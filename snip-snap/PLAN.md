@@ -180,92 +180,47 @@ Snipsnap/
 ## Feature Roadmap
 
 ### v0.1 — Core screenshot loop ✅
-- [x] Xcode project: Snipsnap, SwiftUI, LSUIElement = true
-- [x] NSStatusItem menu bar (icon + dropdown menu) — `SnipsnapApp.swift`
+Region screenshot, toast notification, and clipboard capture are all wired up via ScreenCaptureKit with correct display-relative coordinates.
 - [ ] Global hotkeys wired (NSEvent addGlobalMonitorForEvents)
 - [ ] Full screen screenshot → clipboard + save
 - [ ] Window screenshot (SCShareableContent window picker)
-- [x] Region selector overlay (borderless NSPanel + crosshair drawing) — `RegionSelector.swift`
-- [x] Toast notification (bottom-right, 4s, click to annotate) — `ToastView.swift`
-- [x] Screenshot capture → clipboard (ScreenCaptureKit) — `ScreenshotEngine.swift`
-- [x] Coordinate fix: display-relative + Y-flip for ScreenCaptureKit sourceRect
 
 ### v0.1.5 — Hotkeys (partial ✅)
-- [x] ⌘⇧2 → region screenshot (global monitor via NSEvent)
-- [x] ⌘⇧4 → start recording
-- [x] Accessibility permission request + polling until granted
-- [x] Guard against triggering recording while one is in progress (isStartingRecording flag)
+⌘⇧2 and ⌘⇧4 are live via NSEvent global monitor, with accessibility permission gating and a guard against double-triggering recording.
 - [ ] ⌘⇧1 → full screen screenshot (engine not built yet)
 - [ ] ⌘⇧3 → window screenshot (engine not built yet)
 - [ ] Better onboarding UX for accessibility permission
 
 ### v0.2 — Annotations ✅
-- [x] Annotation window opens from toast click — `AnnotationWindow.swift`
-- [x] Smooth freehand marker (quadratic bezier midpoint smoothing)
-- [x] Highlighter tool (semi-transparent, lineWidth 14)
-- [x] Arrow tool (drag, filled arrowhead)
-- [x] Rectangle tool (rounded rect, stroke only)
-- [x] Text label tool (inline NSTextField, commits on Enter)
-- [x] Number stamp (①②③ auto-incrementing, click to place)
-- [x] Key-driven tool switching (M, H, A, R, T, N)
-- [x] 8-color palette with active swatch indicator
-- [x] Cmd+Z undo
-- [x] Escape → flatten + copy to clipboard + close
-- [x] Copy button in toolbar
-- [x] Floating pill toolbar (NSVisualEffectView, SF Symbols)
-- [ ] Blur / redact region (deferred to v0.6)
+Full annotation suite ships in `AnnotationWindow.swift` — marker, highlighter, arrow, rectangle, text, number stamps, key-driven tool switching, 8-color palette, undo, and a floating pill toolbar.
+- [ ] Blur / redact region (deferred)
 
 ---
 
 ## Upcoming Priorities
 
 ### v0.3 — Annotation upgrades ✅
-- [x] Emoji stamp tool (E key) — picker with 12 default emoji, searchable, click to place
-- [x] White outline on emoji stamps (white glow shadow via CGContext)
-- [x] Select tool (S key) — click to select any annotation
-- [x] Drag selected annotation to reposition
-- [x] Delete key removes selected annotation
-- [x] Selection visual (blue dashed bounding box)
+Added emoji stamp tool (E key) with searchable picker, select tool (S key) with drag-to-reposition and delete, and a dashed bounding box selection visual.
 - [ ] Stroke pressure simulation — vary lineWidth based on mouse speed
 - [ ] Blur / redact region tool (B key)
 - [ ] Snap-to guides when drawing arrows and rectangles near edges
 
 ### v0.4 — Video previewer + recording annotation ✅
-- [x] `VideoAnnotationWindow.swift` — AVPlayerView + "Annotate Frame" button
-- [x] Play/pause controls + time scrubber (AVPlayerView inline controls)
-- [x] Recording toast tap → opens VideoAnnotationWindow
-- [x] "Annotate Frame" grabs current frame → opens AnnotationWindow
-- [x] "Reveal in Finder" button
+`VideoAnnotationWindow.swift` opens from recording toast with play/pause scrubber, and "Annotate Frame" grabs the current frame into `AnnotationWindow`.
 - [ ] Record selected region (not just full screen)
 - [ ] Audio toggles: mic on/off, system audio on/off
 
 ### v0.5 — Capture Bar ✅
-- [x] `CaptureBar.swift` — borderless floating panel centered at bottom of screen
-- [x] Screenshot: Region · Window · Full Screen modes
-- [x] Record: Full Screen · Region modes
-- [x] Voice Clip mode
-- [x] Active mode highlighted with selected state
-- [x] Capture/Record trigger button
-- [x] ⌘6 → show CaptureBar
-- [x] Escape to dismiss
+`CaptureBar.swift` is a floating bottom panel (⌘6) covering screenshot, record, and voice clip modes with active state highlighting and Escape to dismiss.
 - [ ] Options popover (mic toggle, system audio, timer, save location)
 
 ### v0.5.5 — Settings ✅
-- [x] `SettingsWindow.swift` — lightweight settings window
-- [x] Read-only shortcut display (⌘⇧2, ⌘⇧4, ⌘⇧5) with key badge UI
-- [x] "Settings…" menu item in menu bar
+`SettingsWindow.swift` launched with read-only shortcut badges and a "Settings…" menu bar item.
 - [ ] Remappable hotkeys (future)
 - [ ] Output folder picker (future)
 
 ### v0.6 — Loom-style recording with camera ✅
-- [x] `CameraPreviewWindow.swift` — floating circular camera bubble, draggable, AVCaptureVideoPreviewLayer, circular CAShapeLayer mask, drop shadow
-- [x] Camera + mic toggles in CaptureBar — show only when Record mode is selected
-- [x] `RecordingEngine` mic audio support — AVCaptureAudioDataOutput → AAC audio track in MP4
-- [x] Camera compositing baked into MP4 — GPU-backed CIContext, pixel buffer adaptor, thread-safe latestCameraFrame with NSLock
-- [x] Horizontal mirror on camera feed (selfie convention)
-- [x] 2px feathered circular mask via CIRadialGradient + CIBlendWithMask
-- [x] CISourceOverCompositing — camera circle rendered bottom-right corner, 20pt margin
-- [x] CaptureBar.shared exposes camera/mic state to RecordingEngine before startRecording fires
+Floating circular camera bubble composited into the MP4 via GPU-backed CIContext, with mic support, feathered mask, selfie mirror, and camera/mic toggles in CaptureBar.
 - [ ] Draggable camera bubble position baked into composite (currently always bottom-right regardless of bubble position)
 - [ ] Camera bubble size presets (Small / Medium / Large)
 

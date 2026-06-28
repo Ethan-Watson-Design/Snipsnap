@@ -38,9 +38,12 @@ final class CaptureHistory {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var globalMonitor: Any?
+    private var recordingElapsedSeconds = 0
+    private var recordingTimerSource: DispatchSourceTimer?
+    private var isStatusMenuOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -62,17 +65,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         RecordingEngine.shared.onRecordingStarted = { [weak self] in
             guard let self else { return }
-            self.statusItem.button?.image = NSImage(systemSymbolName: "record.circle.fill",
-                                                    accessibilityDescription: "Recording")
+            self.startRecordingStatus()
             self.rebuildMenu()
-            RecordingIndicatorWindow.show()
         }
 
         RecordingEngine.shared.onRecordingStopped = { [weak self] url in
             guard let self else { return }
-            RecordingIndicatorWindow.hide()
-            self.statusItem.button?.image = NSImage(systemSymbolName: "camera.aperture",
-                                                    accessibilityDescription: "Snipsnap")
+            self.stopRecordingStatus()
+            CameraPreviewWindow.hide()
+            CaptureBar.resetActiveCamera()
             self.rebuildMenu()
 
             guard let url else { return }
@@ -96,6 +97,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         RecordingEngine.shared.onRecordingFailed = { [weak self] error in
             guard let self else { return }
+            self.stopRecordingStatus()
+            CameraPreviewWindow.hide()
+            CaptureBar.resetActiveCamera()
             self.rebuildMenu()
             let alert = NSAlert()
             alert.messageText = "Recording Failed"
@@ -242,6 +246,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if RecordingEngine.shared.isRecording {
             recItem = NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
             recItem.target = self
+            let stopCfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [.systemRed]))
+            recItem.image = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: nil)?
+                .withSymbolConfiguration(stopCfg)
+            recItem.subtitle = "● \(formattedRecordingTime(recordingElapsedSeconds))"
         } else if RecordingEngine.shared.isStartingRecording {
             recItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         } else {
@@ -258,7 +267,67 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem(title: "Quit Snipsnap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
+        menu.delegate = self
         statusItem.menu = menu
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        isStatusMenuOpen = true
+        guard RecordingEngine.shared.isRecording else { return }
+        rebuildMenu()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isStatusMenuOpen = false
+    }
+
+    private func formattedRecordingTime(_ seconds: Int) -> String {
+        String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func startRecordingStatus() {
+        recordingElapsedSeconds = 0
+        statusItem.length = NSStatusItem.variableLength
+        updateRecordingStatusDisplay()
+
+        let src = DispatchSource.makeTimerSource(queue: .main)
+        src.schedule(deadline: .now() + 1, repeating: 1)
+        src.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.recordingElapsedSeconds += 1
+            self.updateRecordingStatusDisplay()
+            self.refreshRecordingMenuItemIfOpen()
+        }
+        src.resume()
+        recordingTimerSource = src
+    }
+
+    private func stopRecordingStatus() {
+        recordingTimerSource?.cancel()
+        recordingTimerSource = nil
+        recordingElapsedSeconds = 0
+        statusItem.length = NSStatusItem.squareLength
+        if let button = statusItem.button {
+            button.title = ""
+            button.image = NSImage(systemSymbolName: "camera.aperture", accessibilityDescription: "Snipsnap")
+        }
+    }
+
+    private func updateRecordingStatusDisplay() {
+        guard let button = statusItem.button else { return }
+        let time = formattedRecordingTime(recordingElapsedSeconds)
+        button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")
+        button.imagePosition = .imageLeading
+        button.title = " \(time)"
+        button.toolTip = "Recording — \(time). Click to stop."
+    }
+
+    private func refreshRecordingMenuItemIfOpen() {
+        guard isStatusMenuOpen, let menu = statusItem.menu else { return }
+        for item in menu.items where item.title == "Stop Recording" {
+            item.subtitle = "● \(formattedRecordingTime(recordingElapsedSeconds))"
+            return
+        }
     }
 
     private func thumbnail(for image: NSImage, size: NSSize) -> NSImage {

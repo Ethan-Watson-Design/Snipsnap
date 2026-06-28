@@ -4,15 +4,54 @@
 //
 
 import AppKit
+import Foundation
+
+enum AppSettings {
+    private static let destinationFolderKey = "destinationFolderPath"
+
+    static var destinationFolderURL: URL {
+        get {
+            if let path = UserDefaults.standard.string(forKey: destinationFolderKey) {
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue {
+                    return URL(fileURLWithPath: path, isDirectory: true)
+                }
+            }
+            return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
+        }
+        set {
+            UserDefaults.standard.set(newValue.path, forKey: destinationFolderKey)
+        }
+    }
+
+    static var destinationFolderDisplayPath: String {
+        let path = destinationFolderURL.path
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        if path.hasPrefix(home) {
+            return "~" + path.dropFirst(home.count)
+        }
+        return path
+    }
+
+    static func ensureDestinationFolderExists() throws {
+        try FileManager.default.createDirectory(
+            at: destinationFolderURL,
+            withIntermediateDirectories: true
+        )
+    }
+}
 
 final class SettingsWindow: NSWindow {
 
     static var current: SettingsWindow?
 
+    private var destinationPathLabel: NSTextField!
+
     static func show() {
         if current == nil {
             current = SettingsWindow()
         }
+        current?.refreshDestinationPathLabel()
         current?.center()
         current?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -20,7 +59,7 @@ final class SettingsWindow: NSWindow {
 
     private init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 220),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 270),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -28,7 +67,7 @@ final class SettingsWindow: NSWindow {
         title = "Snipsnap Settings"
         isReleasedWhenClosed = false
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 220))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 270))
         self.contentView = contentView
 
         buildContent(in: contentView)
@@ -36,19 +75,58 @@ final class SettingsWindow: NSWindow {
 
     private func buildContent(in parent: NSView) {
         let width: CGFloat = 380
-        let height: CGFloat = 220
+        let height: CGFloat = 270
         let sideMargin: CGFloat = 20
         let rowHeight: CGFloat = 44
 
-        // "Shortcuts" section header
+        // "Save Location" section
+        let destHeader = NSTextField(labelWithString: "SAVE LOCATION")
+        destHeader.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        destHeader.textColor = .secondaryLabelColor
+        destHeader.frame = NSRect(x: sideMargin, y: height - 32, width: width - sideMargin * 2, height: 16)
+        parent.addSubview(destHeader)
+
+        let destTopSep = separator(y: height - 36, width: width)
+        parent.addSubview(destTopSep)
+
+        let destRowY = height - 36 - rowHeight
+
+        let destLabel = NSTextField(labelWithString: "Save to")
+        destLabel.font = NSFont.systemFont(ofSize: 13)
+        destLabel.textColor = .labelColor
+        destLabel.frame = NSRect(x: sideMargin, y: destRowY + (rowHeight - 16) / 2, width: 52, height: 16)
+        parent.addSubview(destLabel)
+
+        destinationPathLabel = NSTextField(labelWithString: AppSettings.destinationFolderDisplayPath)
+        destinationPathLabel.font = NSFont.systemFont(ofSize: 13)
+        destinationPathLabel.textColor = .secondaryLabelColor
+        destinationPathLabel.lineBreakMode = .byTruncatingMiddle
+        destinationPathLabel.frame = NSRect(
+            x: sideMargin + 58,
+            y: destRowY + (rowHeight - 16) / 2,
+            width: width - sideMargin * 2 - 58 - 80,
+            height: 16
+        )
+        parent.addSubview(destinationPathLabel)
+
+        let changeButton = NSButton(title: "Change…", target: self, action: #selector(chooseDestinationFolder))
+        changeButton.bezelStyle = .rounded
+        changeButton.frame = NSRect(x: width - sideMargin - 72, y: destRowY + (rowHeight - 24) / 2, width: 72, height: 24)
+        parent.addSubview(changeButton)
+
+        let destBottomSep = separator(y: destRowY, width: width)
+        parent.addSubview(destBottomSep)
+
+        // "Shortcuts" section
+        let shortcutsTop = destRowY - 36
+
         let header = NSTextField(labelWithString: "SHORTCUTS")
         header.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
         header.textColor = .secondaryLabelColor
-        header.frame = NSRect(x: sideMargin, y: height - 32, width: width - sideMargin * 2, height: 16)
+        header.frame = NSRect(x: sideMargin, y: shortcutsTop + 4, width: width - sideMargin * 2, height: 16)
         parent.addSubview(header)
 
-        // Separator below header
-        let topSep = separator(y: height - 36, width: width)
+        let topSep = separator(y: shortcutsTop, width: width)
         parent.addSubview(topSep)
 
         let shortcuts: [(String, [String])] = [
@@ -57,19 +135,17 @@ final class SettingsWindow: NSWindow {
             ("Clip Voice",        ["⌘", "⇧", "5"]),
         ]
 
-        var rowTop = height - 36
+        var rowTop = shortcutsTop
 
         for (label, keys) in shortcuts {
             let rowY = rowTop - rowHeight
 
-            // Left label
             let left = NSTextField(labelWithString: label)
             left.font = NSFont.systemFont(ofSize: 13)
             left.textColor = .labelColor
             left.frame = NSRect(x: sideMargin, y: rowY + (rowHeight - 16) / 2, width: 200, height: 16)
             parent.addSubview(left)
 
-            // Key badge row (right-aligned)
             let badgeRowWidth = CGFloat(keys.count) * 24 + CGFloat(keys.count - 1) * 3
             var badgeX = width - sideMargin - badgeRowWidth
             let badgeCenterY = rowY + (rowHeight - 22) / 2
@@ -80,20 +156,41 @@ final class SettingsWindow: NSWindow {
                 badgeX += 24 + 3
             }
 
-            // Bottom separator
             let sep = separator(y: rowY, width: width)
             parent.addSubview(sep)
 
             rowTop = rowY
         }
 
-        // Footer note
         let note = NSTextField(labelWithString: "Custom shortcuts coming soon")
         note.font = NSFont.systemFont(ofSize: 11)
         note.textColor = .tertiaryLabelColor
         note.alignment = .center
         note.frame = NSRect(x: sideMargin, y: 12, width: width - sideMargin * 2, height: 14)
         parent.addSubview(note)
+    }
+
+    private func refreshDestinationPathLabel() {
+        destinationPathLabel?.stringValue = AppSettings.destinationFolderDisplayPath
+    }
+
+    @objc private func chooseDestinationFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Choose"
+        panel.message = "Choose where Snipsnap saves recordings."
+        panel.directoryURL = AppSettings.destinationFolderURL
+
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            AppSettings.destinationFolderURL = url
+            DispatchQueue.main.async {
+                self?.refreshDestinationPathLabel()
+            }
+        }
     }
 
     private func separator(y: CGFloat, width: CGFloat) -> NSView {

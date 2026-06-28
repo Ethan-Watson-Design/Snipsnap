@@ -63,7 +63,6 @@ final class ToastWindow: NSWindow {
     private static func layoutSize(for image: NSImage) -> NSSize {
         let maxW: CGFloat = 240
         let maxH: CGFloat = 140
-        let labelH: CGFloat = 28
         let padding: CGFloat = 12
 
         let imgSize = image.size
@@ -72,13 +71,12 @@ final class ToastWindow: NSWindow {
         let thumbH = imgSize.height * scale
 
         let totalW = thumbW + padding * 2
-        let totalH = thumbH + labelH + padding * 2
+        let totalH = thumbH + padding * 2
         return NSSize(width: totalW, height: totalH)
     }
 
     private func buildContentView(image: NSImage, size: NSSize) -> NSView {
         let padding: CGFloat = 12
-        let labelH: CGFloat = 28
 
         // Frosted glass background
         let vfx = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
@@ -91,8 +89,8 @@ final class ToastWindow: NSWindow {
 
         // Thumbnail
         let thumbW = size.width - padding * 2
-        let thumbH = size.height - labelH - padding * 2
-        let thumbFrame = NSRect(x: padding, y: labelH + padding, width: thumbW, height: thumbH)
+        let thumbH = size.height - padding * 2
+        let thumbFrame = NSRect(x: padding, y: padding, width: thumbW, height: thumbH)
         let imageView = NSImageView(frame: thumbFrame)
         imageView.image = image
         imageView.imageScaling = .scaleProportionallyUpOrDown
@@ -101,16 +99,7 @@ final class ToastWindow: NSWindow {
         imageView.layer?.cornerRadius = 6
         imageView.layer?.masksToBounds = true
 
-        // Label
-        let labelFrame = NSRect(x: padding, y: padding / 2, width: thumbW, height: labelH)
-        let label = NSTextField(labelWithString: "Copied to clipboard")
-        label.frame = labelFrame
-        label.font = .systemFont(ofSize: 11)
-        label.textColor = .secondaryLabelColor
-        label.alignment = .center
-
         vfx.addSubview(imageView)
-        vfx.addSubview(label)
         return vfx
     }
 

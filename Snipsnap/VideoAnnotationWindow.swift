@@ -19,10 +19,13 @@ final class VideoAnnotationWindow: NSWindow {
 
     private var pill: ToolbarPillView!
     private var playPauseButton: NSButton!
+    private var scrubber: NSSlider!
+    private var timeLabel: NSTextField!
     private var timeControlObservation: NSKeyValueObservation?
+    private var timeObserverToken: Any?
 
     private let videoAreaHeight: CGFloat = 492
-    private let toolbarHeight: CGFloat = 68
+    private let toolbarHeight: CGFloat = 84
 
     // MARK: - Entry Point
 
@@ -60,6 +63,7 @@ final class VideoAnnotationWindow: NSWindow {
 
         buildLayout(windowSize: windowSize)
         wire()
+        player.play()
     }
 
     // MARK: - Layout
@@ -71,7 +75,7 @@ final class VideoAnnotationWindow: NSWindow {
 
         let videoRect = NSRect(x: 0, y: toolbarHeight, width: windowSize.width, height: videoAreaHeight)
 
-        // Video player — no built-in controls so the canvas overlay owns all input
+        // Video player — no overlay controls so the annotation canvas owns the full surface
         let playerView = AVPlayerView(frame: videoRect)
         playerView.player = player
         playerView.controlsStyle = .none
@@ -95,8 +99,30 @@ final class VideoAnnotationWindow: NSWindow {
         tbBg.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         root.addSubview(tbBg)
 
+        // ── Scrubber row (top half of toolbar) ──────────────────────────────
+        let scrubRowY: CGFloat = 50
+        let timeLabelWidth: CGFloat = 98
+
+        let scrub = NSSlider(value: 0, minValue: 0, maxValue: 1, target: self, action: #selector(scrubberMoved(_:)))
+        scrub.frame = CGRect(x: 14, y: scrubRowY, width: windowSize.width - timeLabelWidth - 28, height: 16)
+        scrub.sliderType = .linear
+        scrub.isContinuous = true
+        root.addSubview(scrub)
+        self.scrubber = scrub
+
+        let tLabel = NSTextField(labelWithString: "0:00 / 0:00")
+        tLabel.frame = CGRect(x: windowSize.width - timeLabelWidth - 6, y: scrubRowY - 1, width: timeLabelWidth, height: 18)
+        tLabel.alignment = .right
+        tLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        tLabel.textColor = .secondaryLabelColor
+        root.addSubview(tLabel)
+        self.timeLabel = tLabel
+
+        // ── Controls row (bottom half of toolbar) ───────────────────────────
+        let ctrlRowMidY: CGFloat = 26
+
         // Play / Pause button (left)
-        let ppBtn = NSButton(frame: CGRect(x: 14, y: (toolbarHeight - 36) / 2, width: 36, height: 36))
+        let ppBtn = NSButton(frame: CGRect(x: 14, y: ctrlRowMidY - 18, width: 36, height: 36))
         ppBtn.bezelStyle = .regularSquare
         ppBtn.isBordered = false
         ppBtn.imageScaling = .scaleProportionallyDown
@@ -108,7 +134,7 @@ final class VideoAnnotationWindow: NSWindow {
 
         // Reveal in Finder button (right)
         let revealBtn = NSButton(frame: CGRect(
-            x: windowSize.width - 144, y: (toolbarHeight - 30) / 2,
+            x: windowSize.width - 144, y: ctrlRowMidY - 15,
             width: 132, height: 30
         ))
         revealBtn.bezelStyle = .rounded
@@ -117,9 +143,9 @@ final class VideoAnnotationWindow: NSWindow {
         revealBtn.action = #selector(revealInFinder)
         root.addSubview(revealBtn)
 
-        // Pill — centered between the two flanking buttons, 10 pt from bottom edge
+        // Pill — centered in controls row
         let pillX = max(62, (windowSize.width - pill.frame.width) / 2)
-        pill.frame.origin = CGPoint(x: pillX, y: (toolbarHeight - 48) / 2)
+        pill.frame.origin = CGPoint(x: pillX, y: ctrlRowMidY - 24)
         root.addSubview(pill)
 
         contentView = root
@@ -170,6 +196,17 @@ final class VideoAnnotationWindow: NSWindow {
             }
         }
 
+        // Drive scrubber + time label from playback position
+        let interval = CMTime(value: 1, timescale: 10)
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            guard let self else { return }
+            let current = CMTimeGetSeconds(time)
+            let total = CMTimeGetSeconds(self.player.currentItem?.duration ?? .zero)
+            guard total.isFinite, total > 0 else { return }
+            self.scrubber.doubleValue = current / total
+            self.timeLabel.stringValue = "\(Self.formatTime(current)) / \(Self.formatTime(total))"
+        }
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(playerItemDidEnd),
@@ -188,8 +225,30 @@ final class VideoAnnotationWindow: NSWindow {
         }
     }
 
+    @objc private func scrubberMoved(_ sender: NSSlider) {
+        guard let item = player.currentItem else { return }
+        let total = CMTimeGetSeconds(item.duration)
+        guard total.isFinite, total > 0 else { return }
+        let target = CMTimeMakeWithSeconds(sender.doubleValue * total, preferredTimescale: 600)
+        player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     @objc private func playerItemDidEnd() {
         player.seek(to: .zero)
+        scrubber.doubleValue = 0
+    }
+
+    private static func formatTime(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds))
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    override func close() {
+        if let token = timeObserverToken {
+            player.removeTimeObserver(token)
+            timeObserverToken = nil
+        }
+        super.close()
     }
 
     private func updatePlayPauseButton(playing: Bool) {

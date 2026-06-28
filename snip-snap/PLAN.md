@@ -157,15 +157,16 @@ Snipsnap/
 ├── RegionSelector.swift        ✅ Transparent overlay, crosshair, drag-to-select
 ├── ScreenshotEngine.swift      ✅ ScreenCaptureKit capture, coordinate conversion
 ├── ToastView.swift             ✅ Bottom-right preview toast, tap to annotate/reveal
-├── AnnotationWindow.swift      ✅ Full annotation suite, smooth strokes, toolbar
+├── AnnotationWindow.swift      ✅ Full annotation suite, smooth strokes, select/drag, emoji, toolbar
 ├── RecordingEngine.swift       ✅ ScreenCaptureKit + AVFoundation H.264 MP4
+├── VideoAnnotationWindow.swift ✅ AVPlayerView, annotate frame, reveal in Finder
+├── CaptureBar.swift            ✅ Floating capture mode bar (⌘6), all modes
+├── SettingsWindow.swift        ✅ Lightweight settings, read-only shortcut badges
 │
 │   — TO BUILD —
 ├── AudioRingBuffer.swift       # AVAudioEngine tap → circular buffer in RAM
 ├── ClipEngine.swift            # Flush buffer → M4A on "clip that"
-├── CommandBar.swift            # Spotlight-style ⌘6 panel
-├── HistoryView.swift           # All captures in one place
-└── SettingsView.swift          # Hotkeys, buffer duration, output folder
+└── HistoryView.swift           # All captures in one place
 ```
 
 **Info.plist — required keys:**
@@ -218,55 +219,78 @@ Snipsnap/
 
 ## Upcoming Priorities
 
-### v0.3 — Annotation upgrades (in progress)
-The goal: best-in-class annotation that feels like a design tool, not a markup app.
-
-- [x] Emoji stamp tool (E key) — picker with 12 default emoji, click to place — `AnnotationWindow.swift`
-- [ ] Stroke pressure simulation — vary lineWidth based on mouse speed (faster = thinner, slower = thicker)
+### v0.3 — Annotation upgrades ✅
+- [x] Emoji stamp tool (E key) — picker with 12 default emoji, searchable, click to place
+- [x] White outline on emoji stamps (white glow shadow via CGContext)
+- [x] Select tool (S key) — click to select any annotation
+- [x] Drag selected annotation to reposition
+- [x] Delete key removes selected annotation
+- [x] Selection visual (blue dashed bounding box)
+- [ ] Stroke pressure simulation — vary lineWidth based on mouse speed
 - [ ] Blur / redact region tool (B key)
 - [ ] Snap-to guides when drawing arrows and rectangles near edges
 
 ### v0.4 — Video previewer + recording annotation ✅
-- [x] `VideoAnnotationWindow.swift` — AVPlayerView + thumbnail + "Annotate Frame" button
-- [x] Recording toast tap → opens VideoAnnotationWindow instead of Finder
-- [x] "Annotate Frame" grabs current frame at player's currentTime → opens AnnotationWindow
+- [x] `VideoAnnotationWindow.swift` — AVPlayerView + "Annotate Frame" button
+- [x] Play/pause controls + time scrubber (AVPlayerView inline controls)
+- [x] Recording toast tap → opens VideoAnnotationWindow
+- [x] "Annotate Frame" grabs current frame → opens AnnotationWindow
 - [x] "Reveal in Finder" button
 - [ ] Record selected region (not just full screen)
-- [ ] Audio toggles: mic on/off, system audio on/off — quick toggles before recording
+- [ ] Audio toggles: mic on/off, system audio on/off
 
-### v0.5 — Advanced capture mode
-A more powerful launch surface — not just a menu, but a floating HUD.
+### v0.5 — Capture Bar ✅
+- [x] `CaptureBar.swift` — borderless floating panel centered at bottom of screen
+- [x] Screenshot: Region · Window · Full Screen modes
+- [x] Record: Full Screen · Region modes
+- [x] Voice Clip mode
+- [x] Active mode highlighted with selected state
+- [x] Capture/Record trigger button
+- [x] ⌘6 → show CaptureBar
+- [x] Escape to dismiss
+- [ ] Options popover (mic toggle, system audio, timer, save location)
 
-- [ ] `CaptureModeHUD.swift` — a compact floating panel triggered by ⌘6
-  - Segmented control: Screenshot / Record / Voice Clip
-  - Sub-options per mode:
-    - Screenshot: Region / Window / Full screen / Scrolling
-    - Record: Full screen / Region / Window + mic toggle + system audio toggle
-    - Voice: buffer duration selector (30s / 60s / 120s)
-  - Big "Go" button to trigger, Escape to dismiss
-  - Replaces the current command bar concept — more visual, less typing
+### v0.5.5 — Settings ✅
+- [x] `SettingsWindow.swift` — lightweight settings window
+- [x] Read-only shortcut display (⌘⇧2, ⌘⇧4, ⌘⇧5) with key badge UI
+- [x] "Settings…" menu item in menu bar
+- [ ] Remappable hotkeys (future)
+- [ ] Output folder picker (future)
 
-### v0.6 — Voice ("Clip That")
-- [ ] AVAudioEngine mic tap → rolling ring buffer in RAM (never written to disk)
-- [ ] Buffer active indicator dot on menu bar icon
-- [ ] ⌘⇧5 → saves last N seconds as M4A to Desktop
-- [ ] Voice clip toast → tap to reveal in Finder
-- [ ] Configurable buffer duration in CaptureModeHUD
+### v0.6 — Loom-style recording with camera ✅
+- [x] `CameraPreviewWindow.swift` — floating circular camera bubble, draggable, AVCaptureVideoPreviewLayer, circular CAShapeLayer mask, drop shadow
+- [x] Camera + mic toggles in CaptureBar — show only when Record mode is selected
+- [x] `RecordingEngine` mic audio support — AVCaptureAudioDataOutput → AAC audio track in MP4
+- [x] Camera compositing baked into MP4 — GPU-backed CIContext, pixel buffer adaptor, thread-safe latestCameraFrame with NSLock
+- [x] Horizontal mirror on camera feed (selfie convention)
+- [x] 2px feathered circular mask via CIRadialGradient + CIBlendWithMask
+- [x] CISourceOverCompositing — camera circle rendered bottom-right corner, 20pt margin
+- [x] CaptureBar.shared exposes camera/mic state to RecordingEngine before startRecording fires
+- [ ] Draggable camera bubble position baked into composite (currently always bottom-right regardless of bubble position)
+- [ ] Camera bubble size presets (Small / Medium / Large)
 
 ### v0.7 — History + settings
-- [ ] Unified history panel (⌘7) — screenshots, recordings, voice clips in one view
+- [ ] Unified history panel (⌘7) — screenshots and recordings in one view
 - [ ] Re-open any capture for annotation
 - [ ] Scrolling capture
 - [ ] OCR — copy text from screenshot (Vision framework)
-- [ ] Settings: remappable hotkeys, default output folder, audio defaults
-- [ ] Save to user-chosen folder instead of Desktop (set in Settings)
+- [ ] Output folder picker in Settings (instead of always saving to Desktop)
 
 ### v1.0 — Launch
 - [ ] Polished onboarding (permission request flow — this is the first impression)
-- [ ] Full screen + window screenshot modes wired up
+- [ ] Full screen + window screenshot modes wired up (⌘⇧1, ⌘⇧3)
 - [ ] App icon
 - [ ] Notarization
 - [ ] Website / download page
+
+---
+
+## Future / Post-v1
+- Voice "Clip That" — rolling audio buffer, ⌘⇧5 to clip last N seconds
+- Loom-style hosted sharing (upload + shareable URL)
+- Remappable hotkeys in Settings
+- Blur / redact annotation tool
+- Snap-to guides in annotation canvas
 
 ---
 

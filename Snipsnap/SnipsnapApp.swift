@@ -9,24 +9,38 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
+enum CaptureItem {
+    case screenshot(NSImage)
+    case recording(url: URL, thumbnail: NSImage)
+
+    var thumbnail: NSImage {
+        switch self {
+        case .screenshot(let img): return img
+        case .recording(_, let thumb): return thumb
+        }
+    }
+
+    var isRecording: Bool {
+        if case .recording = self { return true }
+        return false
+    }
+}
+
 final class CaptureHistory {
     static let shared = CaptureHistory()
     private init() {}
 
-    var recents: [NSImage] = []
+    var recents: [CaptureItem] = []
 
-    func add(_ image: NSImage) {
-        recents.insert(image, at: 0)
-        if recents.count > 3 { recents = Array(recents.prefix(3)) }
+    func add(_ item: CaptureItem) {
+        recents.insert(item, at: 0)
+        if recents.count > 5 { recents = Array(recents.prefix(5)) }
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var globalMonitor: Any?
-    private var isRecording = false
-    private var isStartingRecording = false
-    private var recordingMenuItem: NSMenuItem?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -46,14 +60,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             RecordingEngine.shared.prewarm()
         }
 
+        RecordingEngine.shared.onRecordingStarted = { [weak self] in
+            guard let self else { return }
+            self.statusItem.button?.image = NSImage(systemSymbolName: "record.circle.fill",
+                                                    accessibilityDescription: "Recording")
+            self.rebuildMenu()
+            RecordingIndicatorWindow.show()
+        }
+
         RecordingEngine.shared.onRecordingStopped = { [weak self] url in
             guard let self else { return }
-            self.isRecording = false
-            self.isStartingRecording = false
+            RecordingIndicatorWindow.hide()
             self.statusItem.button?.image = NSImage(systemSymbolName: "camera.aperture",
                                                     accessibilityDescription: "Snipsnap")
-            self.recordingMenuItem?.title = "Start Recording"
-            self.recordingMenuItem?.isEnabled = true
+            self.rebuildMenu()
 
             guard let url else { return }
             let asset = AVURLAsset(url: url)
@@ -64,12 +84,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ) { _, cgImage, _, _, _ in
                 DispatchQueue.main.async {
                     guard let cgImage else { return }
-                    let thumbnail = NSImage(cgImage: cgImage, size: .zero)
-                    ToastWindow.show(image: thumbnail) {
-                        VideoAnnotationWindow.show(url: url, thumbnail: thumbnail)
+                    let thumb = NSImage(cgImage: cgImage, size: .zero)
+                    CaptureHistory.shared.add(.recording(url: url, thumbnail: thumb))
+                    self.rebuildMenu()
+                    ToastWindow.show(image: thumb) {
+                        VideoAnnotationWindow.show(url: url, thumbnail: thumb)
                     }
                 }
             }
+        }
+
+        RecordingEngine.shared.onRecordingFailed = { [weak self] error in
+            guard let self else { return }
+            self.rebuildMenu()
+            let alert = NSAlert()
+            alert.messageText = "Recording Failed"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .critical
+            alert.runModal()
         }
 
         let trusted = AXIsProcessTrusted()
@@ -85,6 +117,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if event.keyCode == 21 && modifiers == [.command, .shift] {
                 print("[Snipsnap] ⌘⇧4 triggered")
                 self?.toggleRecording()
+            }
+            if event.keyCode == 22 && modifiers == [.command] {
+                print("[Snipsnap] ⌘6 triggered")
+                CaptureBar.show()
             }
         }
         print("[Snipsnap] Global monitor registered: \(globalMonitor != nil)")
@@ -143,6 +179,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         print("[Snipsnap] ⌘⇧4 triggered")
                         self?.toggleRecording()
                     }
+                    if event.keyCode == 22 && modifiers == [.command] {
+                        print("[Snipsnap] ⌘6 triggered")
+                        CaptureBar.show()
+                    }
                 }
                 print("[Snipsnap] Monitor re-registered: \(self.globalMonitor != nil)")
             } else {
@@ -167,18 +207,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             emptyItem.isEnabled = false
             menu.addItem(emptyItem)
         } else {
-            for (index, image) in recents.enumerated() {
+            for (index, capture) in recents.enumerated() {
+                let label: String
+                switch capture {
+                case .screenshot: label = "Screenshot \(index + 1)"
+                case .recording:  label = "Recording \(index + 1)"
+                }
                 let item = NSMenuItem(
-                    title: "Capture \(index + 1)",
+                    title: label,
                     action: #selector(openHistoryItem(_:)),
                     keyEquivalent: ""
                 )
                 item.target = self
                 item.tag = index
-                item.image = thumbnail(for: image, size: NSSize(width: 40, height: 40))
+                item.image = thumbnail(for: capture.thumbnail, size: NSSize(width: 40, height: 40))
                 menu.addItem(item)
             }
         }
+
+        menu.addItem(.separator())
+
+        let captureBarItem = NSMenuItem(title: "Open Capture Bar", action: #selector(showCaptureBar), keyEquivalent: "6")
+        captureBarItem.keyEquivalentModifierMask = [.command]
+        captureBarItem.target = self
+        menu.addItem(captureBarItem)
 
         menu.addItem(.separator())
 
@@ -187,17 +239,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(screenshotItem)
 
         let recItem: NSMenuItem
-        if isRecording {
-            recItem = NSMenuItem(title: "Recording…", action: nil, keyEquivalent: "")
-            recItem.isEnabled = false
+        if RecordingEngine.shared.isRecording {
+            recItem = NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
+            recItem.target = self
+        } else if RecordingEngine.shared.isStartingRecording {
+            recItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         } else {
             recItem = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "")
             recItem.target = self
         }
-        recordingMenuItem = recItem
         menu.addItem(recItem)
 
         menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
         menu.addItem(NSMenuItem(title: "Quit Snipsnap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
@@ -227,30 +285,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openHistoryItem(_ sender: NSMenuItem) {
-        let image = CaptureHistory.shared.recents[sender.tag]
-        AnnotationWindow.show(image: image)
+        let capture = CaptureHistory.shared.recents[sender.tag]
+        switch capture {
+        case .screenshot(let image):
+            AnnotationWindow.show(image: image)
+        case .recording(let url, let thumbnail):
+            VideoAnnotationWindow.show(url: url, thumbnail: thumbnail)
+        }
+    }
+
+    @objc func showCaptureBar() {
+        CaptureBar.show()
     }
 
     @objc func toggleRecording() {
-        guard !isRecording, !isStartingRecording else { return }
-        isStartingRecording = true
-        RecordingEngine.shared.startRecording { [weak self] error in
-            guard let self else { return }
-            self.isStartingRecording = false
-            if let error {
-                let alert = NSAlert()
-                alert.messageText = "Recording Failed"
-                alert.informativeText = error.localizedDescription
-                alert.alertStyle = .critical
-                alert.runModal()
-                return
-            }
-            self.isRecording = true
-            self.statusItem.button?.image = NSImage(systemSymbolName: "record.circle.fill",
-                                                    accessibilityDescription: "Recording")
-            self.recordingMenuItem?.title = "Recording…"
-            self.recordingMenuItem?.isEnabled = false
-        }
+        RecordingEngine.shared.startRecording()
+        rebuildMenu()  // immediately reflect "Starting…" state
+    }
+
+    @objc func stopRecording() {
+        RecordingEngine.shared.stopRecording()
+    }
+
+    @objc func openSettings() {
+        SettingsWindow.show()
     }
 
     @objc func takeScreenshot() {
@@ -262,7 +320,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
                     pasteboard.writeObjects([image])
-                    CaptureHistory.shared.add(image)
+                    CaptureHistory.shared.add(.screenshot(image))
                     self.rebuildMenu()
                     ToastWindow.show(image: image) {
                         AnnotationWindow.show(image: image)

@@ -18,14 +18,15 @@ final class RegionSelector {
 
         let window = RegionSelectorWindow(contentRect: screenRect)
         let view = RegionSelectorView(frame: NSRect(origin: .zero, size: screenRect.size))
-        view.completion = { [weak window] rect in
-            window?.close()
+        view.completion = { rect in
+            Self.overlayWindow?.close()
             Self.overlayWindow = nil
             completion(rect)
         }
 
         window.contentView = view
         window.makeFirstResponder(view)
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
 
         // Retain until dismissed.

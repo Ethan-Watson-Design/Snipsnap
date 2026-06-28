@@ -66,7 +66,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     guard let cgImage else { return }
                     let thumbnail = NSImage(cgImage: cgImage, size: .zero)
                     ToastWindow.show(image: thumbnail) {
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                        VideoAnnotationWindow.show(url: url, thumbnail: thumbnail)
                     }
                 }
             }

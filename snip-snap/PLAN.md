@@ -214,43 +214,58 @@ Snipsnap/
 - [x] Floating pill toolbar (NSVisualEffectView, SF Symbols)
 - [ ] Blur / redact region (deferred to v0.6)
 
-### v0.3 — Command bar
-- [ ] ⌘6 → borderless NSPanel with TextField
-- [ ] Filtered action list (region, window, full, record, clip, timer N, history)
-- [ ] Timer capture (countdown overlay, then fires)
+---
 
-### v0.4 — Screen recording ✅
-- [x] Start via ⌘⇧4 or menu bar
-- [x] Records full screen (first display) — `RecordingEngine.swift`
-- [x] H.264 MP4 saved to Desktop with timestamp filename
-- [x] SCK warm-up on launch (prewarm) to avoid first-frame delay
-- [x] Menu bar icon changes to record.circle.fill while recording
-- [x] System indicator is the stop control (macOS privacy requirement)
-- [x] onRecordingStopped callback → thumbnail toast → tap reveals in Finder
-- [x] Toast shows first-frame thumbnail of the recording
+## Upcoming Priorities
+
+### v0.3 — Annotation upgrades (in progress)
+The goal: best-in-class annotation that feels like a design tool, not a markup app.
+
+- [x] Emoji stamp tool (E key) — picker with 12 default emoji, click to place — `AnnotationWindow.swift`
+- [ ] Stroke pressure simulation — vary lineWidth based on mouse speed (faster = thinner, slower = thicker)
+- [ ] Blur / redact region tool (B key)
+- [ ] Snap-to guides when drawing arrows and rectangles near edges
+
+### v0.4 — Video previewer + recording annotation ✅
+- [x] `VideoAnnotationWindow.swift` — AVPlayerView + thumbnail + "Annotate Frame" button
+- [x] Recording toast tap → opens VideoAnnotationWindow instead of Finder
+- [x] "Annotate Frame" grabs current frame at player's currentTime → opens AnnotationWindow
+- [x] "Reveal in Finder" button
 - [ ] Record selected region (not just full screen)
-- [ ] Audio toggles (mic / system audio, default off)
-- [ ] Save to user-chosen folder instead of Desktop
-- [ ] Trim before saving
+- [ ] Audio toggles: mic on/off, system audio on/off — quick toggles before recording
 
-### v0.5 — Voice ("Clip That")
-- [ ] AVAudioEngine mic tap → ring buffer (opt-in)
-- [ ] Buffer active indicator on menu bar icon
-- [ ] ⌘⇧5 → saves last N seconds as M4A to output folder
-- [ ] Voice clip appears in history
-- [ ] Configurable buffer duration in Settings
+### v0.5 — Advanced capture mode
+A more powerful launch surface — not just a menu, but a floating HUD.
 
-### v0.6 — History + polish
-- [ ] Unified history panel (⌘7)
+- [ ] `CaptureModeHUD.swift` — a compact floating panel triggered by ⌘6
+  - Segmented control: Screenshot / Record / Voice Clip
+  - Sub-options per mode:
+    - Screenshot: Region / Window / Full screen / Scrolling
+    - Record: Full screen / Region / Window + mic toggle + system audio toggle
+    - Voice: buffer duration selector (30s / 60s / 120s)
+  - Big "Go" button to trigger, Escape to dismiss
+  - Replaces the current command bar concept — more visual, less typing
+
+### v0.6 — Voice ("Clip That")
+- [ ] AVAudioEngine mic tap → rolling ring buffer in RAM (never written to disk)
+- [ ] Buffer active indicator dot on menu bar icon
+- [ ] ⌘⇧5 → saves last N seconds as M4A to Desktop
+- [ ] Voice clip toast → tap to reveal in Finder
+- [ ] Configurable buffer duration in CaptureModeHUD
+
+### v0.7 — History + settings
+- [ ] Unified history panel (⌘7) — screenshots, recordings, voice clips in one view
 - [ ] Re-open any capture for annotation
 - [ ] Scrolling capture
-- [ ] OCR (copy text from screenshot, Vision framework)
-- [ ] Settings: remappable hotkeys, buffer duration, output folder, audio defaults
+- [ ] OCR — copy text from screenshot (Vision framework)
+- [ ] Settings: remappable hotkeys, default output folder, audio defaults
+- [ ] Save to user-chosen folder instead of Desktop (set in Settings)
 
 ### v1.0 — Launch
-- [ ] Polished onboarding (permission request flow)
+- [ ] Polished onboarding (permission request flow — this is the first impression)
+- [ ] Full screen + window screenshot modes wired up
 - [ ] App icon
-- [ ] Notarization (required for direct distribution on macOS)
+- [ ] Notarization
 - [ ] Website / download page
 
 ---

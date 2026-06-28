@@ -14,7 +14,7 @@ enum StrokeTool {
 }
 
 enum AnnotationTool: CaseIterable, Hashable {
-    case marker, highlighter, arrow, rect, text, number
+    case marker, highlighter, arrow, rect, text, number, emoji
 
     var sfSymbol: String {
         switch self {
@@ -24,6 +24,7 @@ enum AnnotationTool: CaseIterable, Hashable {
         case .rect:        return "rectangle"
         case .text:        return "textformat"
         case .number:      return "number.circle"
+        case .emoji:       return "face.smiling"
         }
     }
 }
@@ -34,6 +35,7 @@ enum Annotation {
     case rect(rect: CGRect, color: NSColor)
     case text(origin: CGPoint, text: String, color: NSColor)
     case number(center: CGPoint, value: Int, color: NSColor)
+    case emoji(center: CGPoint, emoji: String, size: CGFloat)
 }
 
 // MARK: - Color Palette
@@ -148,6 +150,140 @@ final class AnnotationTextField: NSTextField {
     }
 }
 
+// MARK: - EmojiPickerPanel
+
+final class EmojiPickerPanel: NSObject, NSWindowDelegate {
+
+    private static let emojiKeywords: [(emoji: String, keys: [String])] = [
+        ("👍", ["thumbs", "up", "like", "good", "ok"]),
+        ("❤️", ["heart", "love", "red"]),
+        ("🔥", ["fire", "hot", "flame"]),
+        ("✅", ["check", "done", "yes", "ok", "green"]),
+        ("❌", ["cross", "no", "wrong", "error", "x"]),
+        ("⚠️", ["warning", "caution", "alert"]),
+        ("💡", ["idea", "light", "bulb", "tip"]),
+        ("🎉", ["party", "celebrate", "tada", "congrats"]),
+        ("👀", ["eyes", "look", "watch", "see"]),
+        ("💬", ["comment", "chat", "speech", "bubble", "message"]),
+        ("🐛", ["bug", "error", "issue"]),
+        ("⭐️", ["star", "favorite", "rate"]),
+    ]
+    private static let defaultEmojis: [String] = emojiKeywords.map(\.emoji)
+
+    private let panel: NSPanel
+    private let onSelect: (String) -> Void
+    private var filteredEmojis: [String] = defaultEmojis
+    private weak var gridStack: NSStackView?
+
+    init(nearScreenPoint point: CGPoint, onSelect: @escaping (String) -> Void) {
+        self.onSelect = onSelect
+
+        let panelW: CGFloat = 220
+        let panelH: CGFloat = 190
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        var ox = point.x + 12
+        var oy = point.y - panelH / 2
+        ox = min(ox, screen.maxX - panelW - 10)
+        ox = max(ox, screen.minX + 10)
+        oy = min(oy, screen.maxY - panelH - 10)
+        oy = max(oy, screen.minY + 10)
+
+        panel = NSPanel(
+            contentRect: NSRect(x: ox, y: oy, width: panelW, height: panelH),
+            styleMask: [.nonactivatingPanel, .titled, .hudWindow],
+            backing: .buffered,
+            defer: false
+        )
+        panel.title = ""
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.hidesOnDeactivate = false
+
+        super.init()
+        panel.delegate = self
+        buildUI()
+    }
+
+    private func buildUI() {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let search = NSSearchField()
+        search.translatesAutoresizingMaskIntoConstraints = false
+        search.placeholderString = "Search emoji…"
+        search.target = self
+        search.action = #selector(searchChanged(_:))
+
+        let grid = NSStackView()
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        grid.orientation = .vertical
+        grid.spacing = 2
+        gridStack = grid
+
+        container.addSubview(search)
+        container.addSubview(grid)
+        NSLayoutConstraint.activate([
+            search.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            search.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            search.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            grid.topAnchor.constraint(equalTo: search.bottomAnchor, constant: 6),
+            grid.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            grid.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            grid.bottomAnchor.constraint(lessThanOrEqualTo: container.bottomAnchor, constant: -8),
+        ])
+        panel.contentView = container
+        rebuildGrid()
+    }
+
+    private func rebuildGrid() {
+        guard let grid = gridStack else { return }
+        grid.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let cols = 4
+        var rowViews: [NSView] = []
+        for (i, em) in filteredEmojis.enumerated() {
+            let btn = NSButton(frame: .zero)
+            btn.title = em
+            btn.font = NSFont.systemFont(ofSize: 24)
+            btn.isBordered = false
+            btn.bezelStyle = .regularSquare
+            btn.target = self
+            btn.action = #selector(emojiTapped(_:))
+            rowViews.append(btn)
+            if rowViews.count == cols || i == filteredEmojis.count - 1 {
+                let row = NSStackView(views: rowViews)
+                row.orientation = .horizontal
+                row.spacing = 2
+                row.distribution = .fillEqually
+                grid.addArrangedSubview(row)
+                rowViews = []
+            }
+        }
+    }
+
+    @objc private func searchChanged(_ sender: NSSearchField) {
+        let q = sender.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
+        if q.isEmpty {
+            filteredEmojis = Self.defaultEmojis
+        } else {
+            let matches = Self.emojiKeywords.filter { _, keys in
+                keys.contains { $0.hasPrefix(q) }
+            }.map(\.emoji)
+            filteredEmojis = matches.isEmpty ? Self.defaultEmojis : matches
+        }
+        rebuildGrid()
+    }
+
+    @objc private func emojiTapped(_ sender: NSButton) {
+        let em = sender.title
+        panel.close()
+        onSelect(em)
+    }
+
+    func show() { panel.makeKeyAndOrderFront(nil) }
+    func close() { panel.close() }
+}
+
 // MARK: - AnnotationCanvasView
 
 final class AnnotationCanvasView: NSView {
@@ -164,10 +300,14 @@ final class AnnotationCanvasView: NSView {
     var onToolChanged: ((AnnotationTool) -> Void)?
     /// Called when Escape is pressed (with or without an active text field).
     var onEscapeAction: (() -> Void)?
+    /// Called just before the first mouse-down begins a new stroke/shape.
+    var onWillDraw: (() -> Void)?
 
     private var strokePoints: [CGPoint] = []
     private var dragStart: CGPoint = .zero
     private var activeTextField: AnnotationTextField?
+    private var activeEmojiPicker: EmojiPickerPanel?
+    private var pendingEmojiPoint: CGPoint = .zero
 
     private var nextNumberValue: Int {
         let used = annotations.compactMap { ann -> Int? in
@@ -254,6 +394,20 @@ final class AnnotationCanvasView: NSView {
                 withAttributes: numAttrs
             )
             ctx.restoreGState()
+
+        case let .emoji(center, emojiStr, size):
+            ctx.saveGState()
+            ctx.setAlpha(1)
+            let emojiAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: size),
+            ]
+            let es = emojiStr as NSString
+            let esz = es.size(withAttributes: emojiAttrs)
+            es.draw(
+                at: CGPoint(x: center.x - esz.width / 2, y: center.y - esz.height / 2),
+                withAttributes: emojiAttrs
+            )
+            ctx.restoreGState()
         }
     }
 
@@ -263,6 +417,7 @@ final class AnnotationCanvasView: NSView {
     override var acceptsFirstResponder: Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        onWillDraw?()
         let pt = convert(event.locationInWindow, from: nil)
 
         switch selectedTool {
@@ -285,6 +440,20 @@ final class AnnotationCanvasView: NSView {
         case .number:
             annotations.append(.number(center: pt, value: nextNumberValue, color: selectedColor))
             needsDisplay = true
+            return
+        case .emoji:
+            let winPt = convert(pt, to: nil)
+            let screenPt = window.map { $0.convertPoint(toScreen: winPt) } ?? pt
+            pendingEmojiPoint = pt
+            activeEmojiPicker?.close()
+            let picker = EmojiPickerPanel(nearScreenPoint: screenPt) { [weak self] em in
+                guard let self else { return }
+                annotations.append(.emoji(center: pendingEmojiPoint, emoji: em, size: 32))
+                activeEmojiPicker = nil
+                needsDisplay = true
+            }
+            activeEmojiPicker = picker
+            picker.show()
             return
         }
         needsDisplay = true
@@ -391,6 +560,7 @@ final class AnnotationCanvasView: NSView {
         case "r": activate(.rect)
         case "t": activate(.text)
         case "n": activate(.number)
+        case "e": activate(.emoji)
         case "\u{1B}":
             commitActiveTextField()
             onEscapeAction?()
@@ -401,6 +571,8 @@ final class AnnotationCanvasView: NSView {
 
     private func activate(_ tool: AnnotationTool) {
         commitActiveTextField()
+        activeEmojiPicker?.close()
+        activeEmojiPicker = nil
         selectedTool = tool
         onToolChanged?(tool)
     }
@@ -678,13 +850,18 @@ final class AnnotationWindow: NSWindow {
         // Build pill first so we know its computed width.
         pill = ToolbarPillView(frame: CGRect(x: 0, y: 0, width: 100, height: 48))
 
-        let totalH = imageSize.height + toolbarHeight
-        setContentSize(NSSize(width: imageSize.width, height: totalH))
+        // Ensure the content is always wide enough to show the full toolbar.
+        let minWidth = pill.frame.width + 24  // 12 pt padding on each side
+        let contentWidth = max(imageSize.width, minWidth)
+        let imageOffsetX = ((contentWidth - imageSize.width) / 2).rounded()
 
-        let root = NSView(frame: NSRect(origin: .zero, size: NSSize(width: imageSize.width, height: totalH)))
+        let totalH = imageSize.height + toolbarHeight
+        setContentSize(NSSize(width: contentWidth, height: totalH))
+
+        let root = NSView(frame: NSRect(origin: .zero, size: NSSize(width: contentWidth, height: totalH)))
 
         let imageView = NSImageView(frame: NSRect(
-            x: 0, y: toolbarHeight, width: imageSize.width, height: imageSize.height
+            x: imageOffsetX, y: toolbarHeight, width: imageSize.width, height: imageSize.height
         ))
         imageView.image = screenshot
         imageView.imageScaling = .scaleProportionallyUpOrDown
@@ -694,18 +871,18 @@ final class AnnotationWindow: NSWindow {
         canvas.frame = imageView.frame
         root.addSubview(canvas)
 
-        let tbBg = NSView(frame: NSRect(x: 0, y: 0, width: imageSize.width, height: toolbarHeight))
+        let tbBg = NSView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: toolbarHeight))
         tbBg.wantsLayer = true
         tbBg.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         root.addSubview(tbBg)
 
-        let sep = NSView(frame: NSRect(x: 0, y: toolbarHeight - 1, width: imageSize.width, height: 1))
+        let sep = NSView(frame: NSRect(x: 0, y: toolbarHeight - 1, width: contentWidth, height: 1))
         sep.wantsLayer = true
         sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
         root.addSubview(sep)
 
         // Center pill horizontally, 10 pt from bottom edge.
-        let pillX = max(12, (imageSize.width - pill.frame.width) / 2)
+        let pillX = ((contentWidth - pill.frame.width) / 2).rounded()
         pill.frame.origin = CGPoint(x: pillX, y: 10)
         root.addSubview(pill)
 

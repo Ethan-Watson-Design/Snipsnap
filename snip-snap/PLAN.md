@@ -153,14 +153,14 @@ All three are independent. Snipsnap asks for mic and system audio permissions on
 
 ```
 Snipsnap/
-├── SnipsnapApp.swift           ✅ @main, AppDelegate, NSStatusItem, menu bar
+├── SnipsnapApp.swift           ✅ @main, AppDelegate, NSStatusItem, menu bar, CaptureHistory
 ├── RegionSelector.swift        ✅ Transparent overlay, crosshair, drag-to-select
 ├── ScreenshotEngine.swift      ✅ ScreenCaptureKit capture, coordinate conversion
-├── ToastView.swift             ✅ Bottom-right preview toast, tap to annotate
-├── AnnotationWindow.swift      ✅ Screenshot + freehand canvas, copy button
+├── ToastView.swift             ✅ Bottom-right preview toast, tap to annotate/reveal
+├── AnnotationWindow.swift      ✅ Full annotation suite, smooth strokes, toolbar
+├── RecordingEngine.swift       ✅ ScreenCaptureKit + AVFoundation H.264 MP4
 │
 │   — TO BUILD —
-├── RecordingEngine.swift       # ScreenCaptureKit + AVFoundation video
 ├── AudioRingBuffer.swift       # AVAudioEngine tap → circular buffer in RAM
 ├── ClipEngine.swift            # Flush buffer → M4A on "clip that"
 ├── CommandBar.swift            # Spotlight-style ⌘6 panel
@@ -191,11 +191,11 @@ Snipsnap/
 
 ### v0.1.5 — Hotkeys (partial ✅)
 - [x] ⌘⇧2 → region screenshot (global monitor via NSEvent)
+- [x] ⌘⇧4 → start recording
 - [x] Accessibility permission request + polling until granted
+- [x] Guard against triggering recording while one is in progress (isStartingRecording flag)
 - [ ] ⌘⇧1 → full screen screenshot (engine not built yet)
 - [ ] ⌘⇧3 → window screenshot (engine not built yet)
-- [ ] ⌘⇧4 → start/stop recording (engine not built yet)
-- [ ] Guard against triggering capture while one is in progress
 - [ ] Better onboarding UX for accessibility permission
 
 ### v0.2 — Annotations ✅
@@ -219,13 +219,19 @@ Snipsnap/
 - [ ] Filtered action list (region, window, full, record, clip, timer N, history)
 - [ ] Timer capture (countdown overlay, then fires)
 
-### v0.4 — Screen recording
-- [ ] Start/stop via ⌘⇧4
-- [ ] Record full screen or region
+### v0.4 — Screen recording ✅
+- [x] Start via ⌘⇧4 or menu bar
+- [x] Records full screen (first display) — `RecordingEngine.swift`
+- [x] H.264 MP4 saved to Desktop with timestamp filename
+- [x] SCK warm-up on launch (prewarm) to avoid first-frame delay
+- [x] Menu bar icon changes to record.circle.fill while recording
+- [x] System indicator is the stop control (macOS privacy requirement)
+- [x] onRecordingStopped callback → thumbnail toast → tap reveals in Finder
+- [x] Toast shows first-frame thumbnail of the recording
+- [ ] Record selected region (not just full screen)
 - [ ] Audio toggles (mic / system audio, default off)
-- [ ] MP4 save to output folder
-- [ ] Recording timer in menu bar icon
-- [ ] Preview + trim before saving
+- [ ] Save to user-chosen folder instead of Desktop
+- [ ] Trim before saving
 
 ### v0.5 — Voice ("Clip That")
 - [ ] AVAudioEngine mic tap → ring buffer (opt-in)

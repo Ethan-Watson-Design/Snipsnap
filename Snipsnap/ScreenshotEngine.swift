@@ -30,7 +30,18 @@ class ScreenshotEngine {
                 let config = SCStreamConfiguration()
                 config.width = Int(rect.width)
                 config.height = Int(rect.height)
-                config.sourceRect = rect
+                let displayOriginX = display.frame.origin.x
+                let displayOriginY = display.frame.origin.y
+                let displayHeight = CGFloat(display.height)
+
+                let localRect = CGRect(
+                    x: rect.origin.x - displayOriginX,
+                    y: displayHeight - (rect.origin.y - displayOriginY) - rect.height,
+                    width: rect.width,
+                    height: rect.height
+                )
+
+                config.sourceRect = localRect
                 config.scalesToFit = false
 
                 let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)

@@ -9,7 +9,7 @@ import AppKit
 
 final class ToastWindow: NSWindow {
 
-    private static weak var current: ToastWindow?
+    private static var current: ToastWindow?
 
     private let onTap: () -> Void
     private var dismissTimer: Timer?
@@ -45,6 +45,9 @@ final class ToastWindow: NSWindow {
         level = .floating
         isMovableByWindowBackground = false
         collectionBehavior = [.canJoinAllSpaces, .stationary]
+        // Prevent AppKit from sending an extra ObjC release on close.
+        // Without this, ARC + AppKit double-free the window → EXC_BAD_ACCESS.
+        isReleasedWhenClosed = false
 
         let contentView = buildContentView(image: image, size: contentSize)
         self.contentView = contentView
@@ -156,6 +159,7 @@ final class ToastWindow: NSWindow {
             animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             self?.close()
+            ToastWindow.current = nil
         })
     }
 
@@ -163,6 +167,7 @@ final class ToastWindow: NSWindow {
         dismissTimer?.invalidate()
         dismissTimer = nil
         close()
+        ToastWindow.current = nil
     }
 
     // MARK: - Interaction

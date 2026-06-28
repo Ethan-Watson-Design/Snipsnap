@@ -41,7 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     pasteboard.clearContents()
                     pasteboard.writeObjects([image])
                     ToastWindow.show(image: image) {
-                        // onTap: future action (e.g. open in editor)
+                        AnnotationWindow.show(image: image)
                     }
                 }
             }

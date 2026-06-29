@@ -56,20 +56,50 @@ All hotkeys editable in Settings, stored in UserDefaults.
 
 ---
 
-## Command Bar
+## Capture Bar (current, ⌘6)
 
-Spotlight-style panel triggered by ⌘6. Type to run any action:
+Visual icon panel triggered by ⌘6. Six capture modes split across screenshot and recording groups, with camera/mic/system-audio/background toggles and a Capture button. Built as a floating `NSPanel`.
 
-- `region` → region screenshot
-- `window` → window picker
-- `full` → full screen
-- `record` → start recording
-- `clip` → clip last 60s of voice
-- `clip 30` → clip last 30s
-- `timer 5` → 5s countdown then capture
-- `history` → open capture history
+---
 
-Implemented as a borderless `NSPanel` with a `TextField` and filtered results list. Closes on Escape or after any action fires.
+## Command Bar (future, ⌘6 or separate hotkey)
+
+Spotlight-style text panel that coexists with or replaces the visual Capture Bar for power users. The idea: press the hotkey, type a short command, hit Return.
+
+**Commands:**
+
+| Input | Action |
+|-------|--------|
+| `region` | Region screenshot |
+| `window` | Window picker |
+| `full` | Full screen screenshot |
+| `record` | Start/stop recording |
+| `record window` | Window recording |
+| `record region` | Region recording |
+| `clip` | Clip last 60s of voice |
+| `clip 30` | Clip last 30s |
+| `timer 5` | 5s countdown then capture |
+| `history` | Open capture library |
+| `cam off` | Disable camera overlay |
+| `mic on` / `mic off` | Toggle mic |
+
+**UX design:**
+- Borderless `NSPanel`, ~440px wide, centered top-quarter of screen (not bottom like the visual bar)
+- Single `NSTextField` with a filtered results list below (max 5 results)
+- Results update on each keystroke, first result auto-highlighted
+- Return fires the top result; arrow keys navigate; Escape dismisses
+- Each result row: icon (SF Symbol) + command name + keyboard shortcut if any
+- Partial matching: typing `rec` surfaces `record`, `record window`, `record region`
+- History of last 3 used commands surfaced when the field is empty
+
+**Implementation notes:**
+- Separate from `CaptureBar` — both can exist; Command Bar is an opt-in power-user layer
+- Commands are a static array of `CommandEntry` structs with a name, aliases, SF symbol, and action closure
+- Fuzzy match on name + aliases using simple `contains` or `levenshtein` threshold
+- Close after any action fires (same as Escape)
+- `CommandBar.swift` — new file, no dependency on `CaptureBar`
+
+**Open question:** does ⌘6 toggle between the two, or does Command Bar get its own hotkey (e.g. ⌘Space-style with a user-defined key)?
 
 ---
 
@@ -153,20 +183,22 @@ All three are independent. Snipsnap asks for mic and system audio permissions on
 
 ```
 Snipsnap/
-├── SnipsnapApp.swift           ✅ @main, AppDelegate, NSStatusItem, menu bar, CaptureHistory
-├── RegionSelector.swift        ✅ Transparent overlay, crosshair, drag-to-select
-├── ScreenshotEngine.swift      ✅ ScreenCaptureKit capture, coordinate conversion
-├── ToastView.swift             ✅ Bottom-right preview toast, tap to annotate/reveal
-├── AnnotationWindow.swift      ✅ Full annotation suite, smooth strokes, select/drag, emoji, toolbar
-├── RecordingEngine.swift       ✅ ScreenCaptureKit + AVFoundation H.264 MP4
-├── VideoAnnotationWindow.swift ✅ AVPlayerView, annotate frame, reveal in Finder
-├── CaptureBar.swift            ✅ Floating capture mode bar (⌘6), all modes
-├── SettingsWindow.swift        ✅ Lightweight settings, read-only shortcut badges
+├── SnipsnapApp.swift             ✅ @main, AppDelegate, NSStatusItem, menu bar
+├── RegionSelector.swift          ✅ Transparent overlay, crosshair, drag-to-select
+├── ScreenshotEngine.swift        ✅ ScreenCaptureKit capture, coordinate conversion
+├── ToastView.swift               ✅ Bottom-right preview toast, tap to annotate/reveal
+├── AnnotationWindow.swift        ✅ Full annotation suite, smooth strokes, select/drag, emoji, toolbar
+├── RecordingEngine.swift         ✅ ScreenCaptureKit + AVFoundation H.264 MP4
+├── VideoAnnotationWindow.swift   ✅ AVPlayerView, annotate frame, reveal in Finder
+├── CaptureBar.swift              ✅ Floating capture mode panel (⌘6), all modes + camera/mic/audio toggles
+├── CaptureHistory.swift          ✅ In-memory + on-disk capture history, JSON manifest
+├── CaptureLibraryWindow.swift    ✅ NavigationSplitView history panel — sidebar list + detail preview
+├── SettingsWindow.swift          ✅ Save location picker, read-only shortcut badges
 │
 │   — TO BUILD —
-├── AudioRingBuffer.swift       # AVAudioEngine tap → circular buffer in RAM
-├── ClipEngine.swift            # Flush buffer → M4A on "clip that"
-└── HistoryView.swift           # All captures in one place
+├── AudioRingBuffer.swift         # AVAudioEngine tap → circular buffer in RAM
+├── ClipEngine.swift              # Flush buffer → M4A on "clip that"
+└── CommandBar.swift              # Future: Spotlight-style text command panel
 ```
 
 **Info.plist — required keys:**
@@ -180,15 +212,13 @@ Snipsnap/
 ## Feature Roadmap
 
 ### v0.1 — Core screenshot loop ✅
-Region screenshot, toast notification, and clipboard capture are all wired up via ScreenCaptureKit with correct display-relative coordinates.
-- [ ] Global hotkeys wired (NSEvent addGlobalMonitorForEvents)
-- [ ] Full screen screenshot → clipboard + save
-- [ ] Window screenshot (SCShareableContent window picker)
+Region screenshot, toast notification, and clipboard capture are all wired up via ScreenCaptureKit with correct display-relative coordinates. Global hotkeys (⌘⇧2, ⌘⇧4, ⌘6) live via NSEvent global monitor with accessibility permission gating.
 
 ### v0.1.5 — Hotkeys (partial ✅)
 ⌘⇧2 and ⌘⇧4 are live via NSEvent global monitor, with accessibility permission gating and a guard against double-triggering recording.
-- [ ] ⌘⇧1 → full screen screenshot (engine not built yet)
-- [ ] ⌘⇧3 → window screenshot (engine not built yet)
+- [ ] ⌘⇧1 → full screen screenshot (wire in global monitor + CaptureBar execute)
+- [ ] ⌘⇧3 → window screenshot (wire in global monitor + CaptureBar execute)
+- [ ] ⌘7 → open capture library (wire in global monitor + AppDelegate)
 - [ ] Better onboarding UX for accessibility permission
 
 ### v0.2 — Annotations ✅
@@ -215,24 +245,30 @@ Added emoji stamp tool (E key) with searchable picker, select tool (S key) with 
 - [ ] Options popover (mic toggle, system audio, timer, save location)
 
 ### v0.5.5 — Settings ✅
-`SettingsWindow.swift` launched with read-only shortcut badges and a "Settings…" menu bar item.
+`SettingsWindow.swift` launched with save location picker and read-only shortcut badges. Output folder preference stored in UserDefaults via `AppSettings`.
+- [ ] Wire save location into screenshot export — `CaptureHistory.saveScreenshot` currently ignores `AppSettings.destinationFolderURL` and always saves to Application Support
 - [ ] Remappable hotkeys (future)
-- [ ] Output folder picker (future)
 
 ### v0.6 — Loom-style recording with camera ✅
 Floating circular camera bubble composited into the MP4 via GPU-backed CIContext, with mic support, feathered mask, selfie mirror, and camera/mic toggles in CaptureBar.
 - [ ] Draggable camera bubble position baked into composite (currently always bottom-right regardless of bubble position)
 - [ ] Camera bubble size presets (Small / Medium / Large)
 
-### v0.7 — History + settings
-- [ ] Unified history panel (⌘7) — screenshots and recordings in one view
-- [ ] Re-open any capture for annotation
+### v0.7 — History ✅ (partial)
+`CaptureLibraryWindow.swift` ships as a NavigationSplitView with sidebar list + detail preview pane. Accessible via "Show All…" in the menu bar. Screenshots and recordings both shown; right-click → Show in Finder / Move to Trash.
+- [ ] Wire ⌘7 hotkey to open the library
+- [ ] Re-open screenshot for annotation from the library (currently only works from toast)
 - [ ] Scrolling capture
 - [ ] OCR — copy text from screenshot (Vision framework)
-- [ ] Output folder picker in Settings (instead of always saving to Desktop)
+
+### v0.8 — Onboarding
+No onboarding exists yet. First launch silently falls back to Desktop for save location. This is the first impression — design it well.
+- [ ] First-launch flow: request screen recording permission → request accessibility permission → pick save folder
+- [ ] Each step is a single focused sheet, not an alert dump
+- [ ] Don't proceed to the next step until the prior permission is granted (poll + retry)
+- [ ] Save folder step: show a picker with a suggested default (~/Desktop or ~/Screenshots), let user change it, persist to `AppSettings`
 
 ### v1.0 — Launch
-- [ ] Polished onboarding (permission request flow — this is the first impression)
 - [ ] Full screen + window screenshot modes wired up (⌘⇧1, ⌘⇧3)
 - [ ] App icon
 - [ ] Notarization
@@ -241,11 +277,14 @@ Floating circular camera bubble composited into the MP4 via GPU-backed CIContext
 ---
 
 ## Future / Post-v1
-- Voice "Clip That" — rolling audio buffer, ⌘⇧5 to clip last N seconds
+- Voice "Clip That" — rolling audio buffer, ⌘⇧5 to clip last N seconds (`AudioRingBuffer.swift` + `ClipEngine.swift`)
+- Command Bar (`CommandBar.swift`) — Spotlight-style text panel, power-user layer on top of the visual Capture Bar
 - Loom-style hosted sharing (upload + shareable URL)
 - Remappable hotkeys in Settings
-- Blur / redact annotation tool
+- Blur / redact annotation tool (B key, deferred from v0.2)
 - Snap-to guides in annotation canvas
+- Camera bubble drag position baked into recording composite (currently always bottom-right)
+- Camera bubble size presets (Small / Medium / Large)
 
 ---
 

@@ -9,43 +9,17 @@ import SwiftUI
 import AppKit
 import AVFoundation
 
-enum CaptureItem {
-    case screenshot(NSImage)
-    case recording(url: URL, thumbnail: NSImage)
-
-    var thumbnail: NSImage {
-        switch self {
-        case .screenshot(let img): return img
-        case .recording(_, let thumb): return thumb
-        }
-    }
-
-    var isRecording: Bool {
-        if case .recording = self { return true }
-        return false
-    }
-}
-
-final class CaptureHistory {
-    static let shared = CaptureHistory()
-    private init() {}
-
-    var recents: [CaptureItem] = []
-
-    func add(_ item: CaptureItem) {
-        recents.insert(item, at: 0)
-        if recents.count > 5 { recents = Array(recents.prefix(5)) }
-    }
-}
-
-class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var globalMonitor: Any?
+    private var recordingEscapeGlobalMonitor: Any?
+    private var recordingEscapeLocalMonitor: Any?
     private var recordingElapsedSeconds = 0
     private var recordingTimerSource: DispatchSourceTimer?
-    private var isStatusMenuOpen = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
@@ -66,13 +40,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RecordingEngine.shared.onRecordingStarted = { [weak self] in
             guard let self else { return }
             self.startRecordingStatus()
+            self.startRecordingEscapeMonitor()
             self.rebuildMenu()
         }
 
         RecordingEngine.shared.onRecordingStopped = { [weak self] url in
             guard let self else { return }
+            self.stopRecordingEscapeMonitor()
             self.stopRecordingStatus()
+            RecordingEngine.shared.onCompositedPreviewFrame = nil
             CameraPreviewWindow.hide()
+            RecordingBackgroundPreviewWindow.hide()
             CaptureBar.resetActiveCamera()
             self.rebuildMenu()
 
@@ -97,8 +75,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         RecordingEngine.shared.onRecordingFailed = { [weak self] error in
             guard let self else { return }
+            self.stopRecordingEscapeMonitor()
             self.stopRecordingStatus()
+            RecordingEngine.shared.onCompositedPreviewFrame = nil
             CameraPreviewWindow.hide()
+            RecordingBackgroundPreviewWindow.hide()
             CaptureBar.resetActiveCamera()
             self.rebuildMenu()
             let alert = NSAlert()
@@ -111,6 +92,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let trusted = AXIsProcessTrusted()
         print("[Snipsnap] Accessibility trusted: \(trusted)")
 
+        registerGlobalHotkeys()
+        print("[Snipsnap] Global monitor registered: \(globalMonitor != nil)")
+    }
+
+    private func registerGlobalHotkeys() {
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             print("[Snipsnap] keyDown keyCode=\(event.keyCode) modifiers=\(modifiers)")
@@ -127,7 +113,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 CaptureBar.show()
             }
         }
-        print("[Snipsnap] Global monitor registered: \(globalMonitor != nil)")
     }
 
     private func requestAccessibilityPermissionIfNeeded() {
@@ -172,22 +157,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if let old = self.globalMonitor {
                     NSEvent.removeMonitor(old)
                 }
-                self.globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                    print("[Snipsnap] keyDown keyCode=\(event.keyCode) modifiers=\(modifiers)")
-                    if event.keyCode == 19 && modifiers == [.command, .shift] {
-                        print("[Snipsnap] ⌘⇧2 triggered")
-                        self?.takeScreenshot()
-                    }
-                    if event.keyCode == 21 && modifiers == [.command, .shift] {
-                        print("[Snipsnap] ⌘⇧4 triggered")
-                        self?.toggleRecording()
-                    }
-                    if event.keyCode == 22 && modifiers == [.command] {
-                        print("[Snipsnap] ⌘6 triggered")
-                        CaptureBar.show()
-                    }
-                }
+                self.registerGlobalHotkeys()
                 print("[Snipsnap] Monitor re-registered: \(self.globalMonitor != nil)")
             } else {
                 self.pollForAccessibilityGrant()
@@ -196,40 +166,57 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopRecordingEscapeMonitor()
         if let monitor = globalMonitor {
             NSEvent.removeMonitor(monitor)
             globalMonitor = nil
         }
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if AppDockPresentation.isLibraryPresented {
+            CaptureLibraryWindow.current?.makeKeyAndOrderFront(nil)
+        } else {
+            CaptureLibraryWindow.show()
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+        let showAllItem = NSMenuItem(title: "Show All…", action: #selector(showCaptureLibrary), keyEquivalent: "")
+        showAllItem.target = self
+        menu.addItem(showAllItem)
+        return menu
+    }
+
+    private func startRecordingEscapeMonitor() {
+        stopRecordingEscapeMonitor()
+        recordingEscapeGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            self?.stopRecording()
+        }
+        recordingEscapeLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard RecordingEngine.shared.isRecording, event.keyCode == 53 else { return event }
+            self?.stopRecording()
+            return nil
+        }
+    }
+
+    private func stopRecordingEscapeMonitor() {
+        if let monitor = recordingEscapeGlobalMonitor {
+            NSEvent.removeMonitor(monitor)
+            recordingEscapeGlobalMonitor = nil
+        }
+        if let monitor = recordingEscapeLocalMonitor {
+            NSEvent.removeMonitor(monitor)
+            recordingEscapeLocalMonitor = nil
+        }
+    }
+
     func rebuildMenu() {
         let menu = NSMenu()
-
-        let recents = CaptureHistory.shared.recents
-        if recents.isEmpty {
-            let emptyItem = NSMenuItem(title: "No recent captures", action: nil, keyEquivalent: "")
-            emptyItem.isEnabled = false
-            menu.addItem(emptyItem)
-        } else {
-            for (index, capture) in recents.enumerated() {
-                let label: String
-                switch capture {
-                case .screenshot: label = "Screenshot \(index + 1)"
-                case .recording:  label = "Recording \(index + 1)"
-                }
-                let item = NSMenuItem(
-                    title: label,
-                    action: #selector(openHistoryItem(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.tag = index
-                item.image = thumbnail(for: capture.thumbnail, size: NSSize(width: 40, height: 40))
-                menu.addItem(item)
-            }
-        }
-
-        menu.addItem(.separator())
 
         let captureBarItem = NSMenuItem(title: "Open Capture Bar", action: #selector(showCaptureBar), keyEquivalent: "6")
         captureBarItem.keyEquivalentModifierMask = [.command]
@@ -250,7 +237,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .applying(NSImage.SymbolConfiguration(paletteColors: [.systemRed]))
             recItem.image = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: nil)?
                 .withSymbolConfiguration(stopCfg)
-            recItem.subtitle = "● \(formattedRecordingTime(recordingElapsedSeconds))"
         } else if RecordingEngine.shared.isStartingRecording {
             recItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         } else {
@@ -261,24 +247,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let menuEntries = CaptureHistory.shared.menuEntries
+        if menuEntries.isEmpty {
+            let emptyItem = NSMenuItem(title: "No recent captures", action: nil, keyEquivalent: "")
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+        } else {
+            for (index, entry) in menuEntries.enumerated() {
+                let label = entry.displayName
+                let item = NSMenuItem(
+                    title: label,
+                    action: #selector(openHistoryItem(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.tag = index
+                item.image = entry.thumbnail.thumbnail(size: NSSize(width: 40, height: 40))
+                menu.addItem(item)
+            }
+        }
+
+        let showAllItem = NSMenuItem(title: "Show All…", action: #selector(showCaptureLibrary), keyEquivalent: "")
+        showAllItem.target = self
+        menu.addItem(showAllItem)
+
+        menu.addItem(.separator())
+
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
 
         menu.addItem(NSMenuItem(title: "Quit Snipsnap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
-        menu.delegate = self
         statusItem.menu = menu
-    }
-
-    func menuWillOpen(_ menu: NSMenu) {
-        isStatusMenuOpen = true
-        guard RecordingEngine.shared.isRecording else { return }
-        rebuildMenu()
-    }
-
-    func menuDidClose(_ menu: NSMenu) {
-        isStatusMenuOpen = false
     }
 
     private func formattedRecordingTime(_ seconds: Int) -> String {
@@ -296,7 +297,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self else { return }
             self.recordingElapsedSeconds += 1
             self.updateRecordingStatusDisplay()
-            self.refreshRecordingMenuItemIfOpen()
         }
         src.resume()
         recordingTimerSource = src
@@ -322,45 +322,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = "Recording — \(time). Click to stop."
     }
 
-    private func refreshRecordingMenuItemIfOpen() {
-        guard isStatusMenuOpen, let menu = statusItem.menu else { return }
-        for item in menu.items where item.title == "Stop Recording" {
-            item.subtitle = "● \(formattedRecordingTime(recordingElapsedSeconds))"
-            return
-        }
-    }
-
-    private func thumbnail(for image: NSImage, size: NSSize) -> NSImage {
-        let srcSize = image.size
-        guard srcSize.width > 0, srcSize.height > 0 else { return image }
-
-        let widthRatio = size.width / srcSize.width
-        let heightRatio = size.height / srcSize.height
-        let scale = min(widthRatio, heightRatio)
-        let drawSize = NSSize(width: srcSize.width * scale, height: srcSize.height * scale)
-
-        let thumb = NSImage(size: size)
-        thumb.lockFocus()
-        let origin = NSPoint(
-            x: (size.width - drawSize.width) / 2,
-            y: (size.height - drawSize.height) / 2
-        )
-        image.draw(in: NSRect(origin: origin, size: drawSize),
-                   from: NSRect(origin: .zero, size: srcSize),
-                   operation: .copy,
-                   fraction: 1.0)
-        thumb.unlockFocus()
-        return thumb
-    }
-
     @objc private func openHistoryItem(_ sender: NSMenuItem) {
-        let capture = CaptureHistory.shared.recents[sender.tag]
-        switch capture {
-        case .screenshot(let image):
-            AnnotationWindow.show(image: image)
-        case .recording(let url, let thumbnail):
-            VideoAnnotationWindow.show(url: url, thumbnail: thumbnail)
-        }
+        let menuEntries = CaptureHistory.shared.menuEntries
+        guard menuEntries.indices.contains(sender.tag) else { return }
+        CaptureLibraryWindow.open(menuEntries[sender.tag])
+    }
+
+    @objc private func showCaptureLibrary() {
+        CaptureLibraryWindow.show()
     }
 
     @objc func showCaptureBar() {
@@ -406,5 +375,30 @@ struct SnipsnapApp: App {
 
     var body: some Scene {
         Settings { EmptyView() }
+    }
+}
+
+extension NSImage {
+    func thumbnail(size: NSSize) -> NSImage {
+        let srcSize = self.size
+        guard srcSize.width > 0, srcSize.height > 0 else { return self }
+
+        let widthRatio = size.width / srcSize.width
+        let heightRatio = size.height / srcSize.height
+        let scale = min(widthRatio, heightRatio)
+        let drawSize = NSSize(width: srcSize.width * scale, height: srcSize.height * scale)
+
+        let thumb = NSImage(size: size)
+        thumb.lockFocus()
+        let origin = NSPoint(
+            x: (size.width - drawSize.width) / 2,
+            y: (size.height - drawSize.height) / 2
+        )
+        draw(in: NSRect(origin: origin, size: drawSize),
+             from: NSRect(origin: .zero, size: srcSize),
+             operation: .copy,
+             fraction: 1.0)
+        thumb.unlockFocus()
+        return thumb
     }
 }

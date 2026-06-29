@@ -49,6 +49,8 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     var onRecordingStarted: (() -> Void)?
     var onRecordingStopped: ((URL?) -> Void)?
     var onRecordingFailed: ((Error) -> Void)?
+    /// Called with composited frames when recording a window with a background.
+    var onCompositedPreviewFrame: ((CGImage) -> Void)?
 
     /// Whether a recording is currently active.
     private(set) var isRecording = false
@@ -86,6 +88,9 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     private var latestCameraFrame: CVPixelBuffer?
     private let cameraLock = NSLock()
     private lazy var ciContext = CIContext(options: [.useSoftwareRenderer: false])
+    private lazy var blendWithMaskFilter = CIFilter(name: "CIBlendWithMask")
+    private lazy var sourceOverFilter = CIFilter(name: "CISourceOverCompositing")
+    private var cachedMask: (key: String, image: CIImage)?
 
     private var streamRunning = false
     private var outputURL: URL?
@@ -179,7 +184,8 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                     filter = SCContentFilter(desktopIndependentWindow: window)
                     streamW = Int(window.frame.width) * scale
                     streamH = Int(window.frame.height) * scale
-                    if recordingBackground != .none {
+                    let needsCanvasLayout = recordingBackground != .none || cameraDeviceID != nil
+                    if needsCanvasLayout {
                         outputW = 1920 * scale
                         outputH = 1080 * scale
                         usesBackgroundComposite = true
@@ -250,10 +256,12 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                 }
 
                 // Output file
-                let timestamp = Int(Date().timeIntervalSince1970)
                 try AppSettings.ensureDestinationFolderExists()
                 let folderURL = AppSettings.destinationFolderURL
-                let url = folderURL.appendingPathComponent("Snipsnap-recording-\(timestamp).mp4")
+                let url = CaptureNaming.uniqueURL(
+                    in: folderURL,
+                    preferredFilename: CaptureNaming.recordingFilename()
+                )
                 self.outputURL = url
 
                 // Asset writer + video input
@@ -332,32 +340,42 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
 
                 // Camera compositing for window/region captures (full-screen uses the floating preview overlay).
                 if cameraEnabled {
-                    let camSession = AVCaptureSession()
-                    camSession.sessionPreset = .medium
-
-                    let camDevice = cameraDeviceID.flatMap { AVCaptureDevice(uniqueID: $0) }
-                        ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-                        ?? AVCaptureDevice.default(for: .video)
-                    if let camDevice,
-                       let camInput = try? AVCaptureDeviceInput(device: camDevice),
-                       camSession.canAddInput(camInput) {
-                        camSession.addInput(camInput)
+                    let camGranted = await Self.requestCameraAccess()
+                    if !camGranted {
+                        DispatchQueue.main.async {
+                            NSWorkspace.shared.open(
+                                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
+                            )
+                        }
                     }
+                    if camGranted {
+                        let camSession = AVCaptureSession()
+                        camSession.sessionPreset = .medium
 
-                    let videoOut = AVCaptureVideoDataOutput()
-                    videoOut.videoSettings = [
-                        kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
-                    ]
-                    videoOut.alwaysDiscardsLateVideoFrames = true
-                    videoOut.setSampleBufferDelegate(self, queue: cameraQueue)
-                    if camSession.canAddOutput(videoOut) {
-                        camSession.addOutput(videoOut)
-                    }
+                        let camDevice = cameraDeviceID.flatMap { AVCaptureDevice(uniqueID: $0) }
+                            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+                            ?? AVCaptureDevice.default(for: .video)
+                        if let camDevice,
+                           let camInput = try? AVCaptureDeviceInput(device: camDevice),
+                           camSession.canAddInput(camInput) {
+                            camSession.addInput(camInput)
+                        }
 
-                    self.cameraSession = camSession
-                    self.cameraVideoOutput = videoOut
-                    cameraQueue.async { [weak self] in
-                        self?.cameraSession?.startRunning()
+                        let videoOut = AVCaptureVideoDataOutput()
+                        videoOut.videoSettings = [
+                            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+                        ]
+                        videoOut.alwaysDiscardsLateVideoFrames = true
+                        videoOut.setSampleBufferDelegate(self, queue: cameraQueue)
+                        if camSession.canAddOutput(videoOut) {
+                            camSession.addOutput(videoOut)
+                        }
+
+                        self.cameraSession = camSession
+                        self.cameraVideoOutput = videoOut
+                        cameraQueue.async {
+                            camSession.startRunning()
+                        }
                     }
                 }
 
@@ -407,13 +425,25 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                     working = composited
                 }
                 if cameraEnabled, let withCamera = compositeCamera(onto: working) {
+                    if let callback = onCompositedPreviewFrame {
+                        publishPreviewFrame(withCamera, callback: callback)
+                    }
                     pixelBufferAdaptor?.append(withCamera, withPresentationTime: pts)
                 } else if usesBackgroundComposite, working !== screenPB {
+                    if let callback = onCompositedPreviewFrame {
+                        publishPreviewFrame(working, callback: callback)
+                    }
                     pixelBufferAdaptor?.append(working, withPresentationTime: pts)
                 } else {
+                    if let callback = onCompositedPreviewFrame {
+                        publishPreviewFrame(screenPB, callback: callback)
+                    }
                     vInput.append(buffer)
                 }
             } else {
+                if let callback = onCompositedPreviewFrame {
+                    publishPreviewFrame(screenPB, callback: callback)
+                }
                 vInput.append(buffer)
             }
 
@@ -439,92 +469,26 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
 
     /// Places a window capture onto a gradient or image background (Borumi-style).
     private func compositeOntoRecordingBackground(_ windowBuffer: CVPixelBuffer) -> CVPixelBuffer? {
-        let outputW = 1920.0 * CGFloat(recordingPixelScale)
-        let outputH = 1080.0 * CGFloat(recordingPixelScale)
-
+        let scale = CGFloat(recordingPixelScale)
+        let canvasSize = RecordingBackgroundRenderer.canvasSize(for: scale)
         let windowImage = CIImage(cvPixelBuffer: windowBuffer)
-        let background = recordingBackgroundImage(for: recordingBackground, extent: CGRect(x: 0, y: 0, width: outputW, height: outputH))
-
-        let margin = outputW * 0.06
-        let maxW = outputW - margin * 2
-        let maxH = outputH - margin * 2
-        let windowAspect = windowImage.extent.width / windowImage.extent.height
-        var drawW = maxW
-        var drawH = drawW / windowAspect
-        if drawH > maxH {
-            drawH = maxH
-            drawW = drawH * windowAspect
-        }
-        let drawX = (outputW - drawW) / 2
-        let drawY = (outputH - drawH) / 2
-
-        let scaleX = drawW / windowImage.extent.width
-        let scaleY = drawH / windowImage.extent.height
-        let scaledWindow = windowImage
-            .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-            .transformed(by: CGAffineTransform(translationX: drawX, y: drawY))
-
-        guard let compositeFilter = CIFilter(name: "CISourceOverCompositing") else { return nil }
-        compositeFilter.setValue(scaledWindow, forKey: kCIInputImageKey)
-        compositeFilter.setValue(background, forKey: kCIInputBackgroundImageKey)
-        guard let composited = compositeFilter.outputImage else { return nil }
-
-        return renderToPixelBuffer(composited, width: Int(outputW), height: Int(outputH))
+        let layoutCamera: CameraPreviewStyle? = cameraEnabled && cameraStyle == .vertical ? .vertical : nil
+        let composited = RecordingBackgroundRenderer.composite(
+            windowImage: windowImage,
+            background: recordingBackground,
+            canvasSize: canvasSize,
+            cameraStyle: layoutCamera,
+            scale: scale
+        )
+        return renderToPixelBuffer(composited, width: Int(canvasSize.width), height: Int(canvasSize.height))
     }
 
-    private func recordingBackgroundImage(for style: RecordingBackgroundStyle, extent: CGRect) -> CIImage {
-        switch style {
-        case .none:
-            return CIImage(color: .black).cropped(to: extent)
-        case .warm:
-            return linearGradient(
-                colors: [
-                    CIColor(red: 0.98, green: 0.72, blue: 0.45),
-                    CIColor(red: 0.92, green: 0.38, blue: 0.55)
-                ],
-                extent: extent
-            )
-        case .cool:
-            return linearGradient(
-                colors: [
-                    CIColor(red: 0.35, green: 0.75, blue: 0.98),
-                    CIColor(red: 0.18, green: 0.42, blue: 0.92)
-                ],
-                extent: extent
-            )
-        case .midnight:
-            return linearGradient(
-                colors: [
-                    CIColor(red: 0.12, green: 0.14, blue: 0.22),
-                    CIColor(red: 0.04, green: 0.05, blue: 0.10)
-                ],
-                extent: extent
-            )
-        case .custom(let path):
-            guard let image = CIImage(contentsOf: URL(fileURLWithPath: path)) else {
-                return CIImage(color: .black).cropped(to: extent)
-            }
-            let scale = max(extent.width / image.extent.width, extent.height / image.extent.height)
-            let scaledW = image.extent.width * scale
-            let scaledH = image.extent.height * scale
-            let tx = extent.midX - scaledW / 2 - image.extent.minX * scale
-            let ty = extent.midY - scaledH / 2 - image.extent.minY * scale
-            return image
-                .transformed(by: CGAffineTransform(scaleX: scale, y: scale).translatedBy(x: tx / scale, y: ty / scale))
-                .cropped(to: extent)
+    private func publishPreviewFrame(_ pixelBuffer: CVPixelBuffer, callback: @escaping (CGImage) -> Void) {
+        let image = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cgImage = ciContext.createCGImage(image, from: image.extent) else { return }
+        DispatchQueue.main.async {
+            callback(cgImage)
         }
-    }
-
-    private func linearGradient(colors: [CIColor], extent: CGRect) -> CIImage {
-        guard let filter = CIFilter(name: "CILinearGradient") else {
-            return CIImage(color: colors.first ?? .black).cropped(to: extent)
-        }
-        filter.setValue(CIVector(x: extent.minX, y: extent.minY), forKey: "inputPoint0")
-        filter.setValue(CIVector(x: extent.maxX, y: extent.maxY), forKey: "inputPoint1")
-        filter.setValue(colors[0], forKey: "inputColor0")
-        filter.setValue(colors[1], forKey: "inputColor1")
-        return filter.outputImage?.cropped(to: extent)
-            ?? CIImage(color: colors[0]).cropped(to: extent)
     }
 
     private func renderToPixelBuffer(_ image: CIImage, width: Int, height: Int) -> CVPixelBuffer? {
@@ -600,9 +564,9 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                                          screenBuffer: screenBuffer, width: Int(screenW), height: Int(screenH))
 
         case .vertical:
-            let stripW = (screenW / 4).rounded(.down)
-            margin = 20.0 * scale
-            let stripH = screenH - margin * 2
+            let strip = VerticalCameraStripLayout.metrics(screenWidth: screenW, screenHeight: screenH, scale: scale)
+            let stripW = strip.width
+            let stripH = strip.height
             let camScale = max(stripW / camW, stripH / camH)
             let scaledW = camW * camScale
             let scaledH = camH * camScale
@@ -615,12 +579,12 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
             let croppedCam = ciCamera
                 .transformed(by: CGAffineTransform(scaleX: camScale, y: camScale))
                 .cropped(to: cropRect)
-            let tx = screenW - stripW - margin - croppedCam.extent.minX
-            let ty = margin - croppedCam.extent.minY
+            let tx = strip.originX - croppedCam.extent.minX
+            let ty = strip.originY - croppedCam.extent.minY
             let positioned = croppedCam.transformed(by: CGAffineTransform(translationX: tx, y: ty))
-            let mask = roundedRectMask(
+            let mask = VerticalCameraStripLayout.roundedRectMask(
                 rect: CGRect(origin: .zero, size: CGSize(width: stripW, height: stripH)),
-                cornerRadius: 24 * scale,
+                cornerRadius: strip.cornerRadius,
                 translatedTo: CGPoint(x: tx, y: ty)
             )
             return compositeMaskedCamera(positioned, mask: mask, over: ciScreen,
@@ -629,6 +593,9 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     }
 
     private func roundedRectMask(rect: CGRect, cornerRadius: CGFloat, translatedTo origin: CGPoint) -> CIImage {
+        let cacheKey = "\(rect)-\(cornerRadius)-\(origin)"
+        if let cached = cachedMask, cached.key == cacheKey { return cached.image }
+
         let extent = rect.offsetBy(dx: origin.x, dy: origin.y)
         let w = Int(extent.width.rounded())
         let h = Int(extent.height.rounded())
@@ -661,9 +628,11 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         guard let cgImage = ctx.makeImage() else {
             return CIImage(color: .white).cropped(to: extent)
         }
-        return CIImage(cgImage: cgImage)
+        let result = CIImage(cgImage: cgImage)
             .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
             .cropped(to: extent)
+        cachedMask = (key: cacheKey, image: result)
+        return result
     }
 
     private func compositeMaskedCamera(
@@ -674,13 +643,13 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         width: Int,
         height: Int
     ) -> CVPixelBuffer? {
-        guard let blendFilter = CIFilter(name: "CIBlendWithMask") else { return nil }
+        guard let blendFilter = blendWithMaskFilter else { return nil }
         blendFilter.setValue(camera, forKey: kCIInputImageKey)
         blendFilter.setValue(CIImage(color: .clear), forKey: kCIInputBackgroundImageKey)
         blendFilter.setValue(mask, forKey: kCIInputMaskImageKey)
         guard let maskedCam = blendFilter.outputImage else { return nil }
 
-        guard let compositeFilter = CIFilter(name: "CISourceOverCompositing") else { return nil }
+        guard let compositeFilter = sourceOverFilter else { return nil }
         compositeFilter.setValue(maskedCam, forKey: kCIInputImageKey)
         compositeFilter.setValue(screen, forKey: kCIInputBackgroundImageKey)
         guard let composited = compositeFilter.outputImage else { return nil }
@@ -809,6 +778,17 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
             return true
         case .notDetermined:
             return await AVCaptureDevice.requestAccess(for: .audio)
+        default:
+            return false
+        }
+    }
+
+    private static func requestCameraAccess() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: .video)
         default:
             return false
         }

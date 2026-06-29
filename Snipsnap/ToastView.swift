@@ -134,7 +134,9 @@ final class ToastWindow: NSWindow {
 
     private func scheduleDismiss() {
         dismissTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
-            self?.dismissAnimated()
+            DispatchQueue.main.async {
+                self?.dismissAnimated()
+            }
         }
     }
 
@@ -147,8 +149,10 @@ final class ToastWindow: NSWindow {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            self?.close()
-            ToastWindow.current = nil
+            DispatchQueue.main.async {
+                self?.close()
+                ToastWindow.current = nil
+            }
         })
     }
 

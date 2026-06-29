@@ -18,19 +18,11 @@ import Vision
 enum CameraBackgroundStyle: Equatable {
     case none
     case blur
-    case warm
-    case cool
-    case midnight
-    case custom(path: String)
 
     var menuTitle: String {
         switch self {
-        case .none:     return "None"
-        case .blur:     return "Blur"
-        case .warm:     return "Warm"
-        case .cool:     return "Cool"
-        case .midnight: return "Midnight"
-        case .custom:   return "Custom Image"
+        case .none: return "No Blur"
+        case .blur: return "Blur"
         }
     }
 }
@@ -43,8 +35,6 @@ final class CameraBackgroundProcessor {
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private let segmentationRequest = VNGeneratePersonSegmentationRequest()
     private let processingQueue = DispatchQueue(label: "com.snipsnap.cameraBackground", qos: .userInitiated)
-    private var customBackground: CIImage?
-    private var customBackgroundPath: String?
 
     init() {
         segmentationRequest.qualityLevel = .balanced
@@ -119,63 +109,7 @@ final class CameraBackgroundProcessor {
                 .clampedToExtent()
                 .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 18])
                 .cropped(to: extent)
-        case .warm:
-            return gradient(
-                colors: [
-                    CIColor(red: 0.98, green: 0.72, blue: 0.45),
-                    CIColor(red: 0.92, green: 0.38, blue: 0.55)
-                ],
-                extent: extent
-            )
-        case .cool:
-            return gradient(
-                colors: [
-                    CIColor(red: 0.35, green: 0.75, blue: 0.98),
-                    CIColor(red: 0.18, green: 0.42, blue: 0.92)
-                ],
-                extent: extent
-            )
-        case .midnight:
-            return gradient(
-                colors: [
-                    CIColor(red: 0.12, green: 0.14, blue: 0.22),
-                    CIColor(red: 0.04, green: 0.05, blue: 0.10)
-                ],
-                extent: extent
-            )
-        case .custom(let path):
-            if customBackgroundPath != path {
-                customBackgroundPath = path
-                customBackground = CIImage(contentsOf: URL(fileURLWithPath: path))
-            }
-            guard let custom = customBackground else {
-                return CIImage(color: .black).cropped(to: extent)
-            }
-            return custom
-                .transformed(by: fitTransform(image: custom.extent, into: extent))
-                .cropped(to: extent)
         }
-    }
-
-    private func gradient(colors: [CIColor], extent: CGRect) -> CIImage {
-        guard let filter = CIFilter(name: "CILinearGradient") else {
-            return CIImage(color: colors.first ?? .black).cropped(to: extent)
-        }
-        filter.setValue(CIVector(x: extent.minX, y: extent.minY), forKey: "inputPoint0")
-        filter.setValue(CIVector(x: extent.maxX, y: extent.maxY), forKey: "inputPoint1")
-        filter.setValue(colors[0], forKey: "inputColor0")
-        filter.setValue(colors[1], forKey: "inputColor1")
-        return filter.outputImage?.cropped(to: extent)
-            ?? CIImage(color: colors[0]).cropped(to: extent)
-    }
-
-    private func fitTransform(image: CGRect, into target: CGRect) -> CGAffineTransform {
-        let scale = max(target.width / image.width, target.height / image.height)
-        let scaledW = image.width * scale
-        let scaledH = image.height * scale
-        let tx = target.midX - scaledW / 2 - image.minX * scale
-        let ty = target.midY - scaledH / 2 - image.minY * scale
-        return CGAffineTransform(scaleX: scale, y: scale).translatedBy(x: tx / scale, y: ty / scale)
     }
 
     private func composite(foreground: CIImage, background: CIImage, mask: CIImage) -> CIImage {
@@ -192,8 +126,115 @@ final class CameraBackgroundProcessor {
 enum CameraPreviewStyle: Equatable {
     /// Small rounded square anchored to the bottom-right corner.
     case square
-    /// Tall vertical strip (TikTok/Bōrumi style) — 1/4 screen width, full height, far right.
+    /// Portrait strip (9:16) on the right with inset margins.
     case vertical
+}
+
+// MARK: - VerticalCameraStripLayout
+
+enum VerticalCameraStripLayout {
+    static let margin: CGFloat = 24
+    static let cornerRadius: CGFloat = 24
+
+    struct Metrics {
+        let width: CGFloat
+        let height: CGFloat
+        let originX: CGFloat
+        let originY: CGFloat
+        let margin: CGFloat
+        let cornerRadius: CGFloat
+    }
+
+    /// 9:16 portrait strip anchored to the right with top/right/bottom margins.
+    static func metrics(screenWidth: CGFloat, screenHeight: CGFloat, scale: CGFloat = 1) -> Metrics {
+        let m = margin * scale
+        let cr = cornerRadius * scale
+        let maxH = screenHeight - m * 2
+        var w = (screenWidth / 4).rounded(.down)
+        var h = (w * 16 / 9).rounded(.down)
+        if h > maxH {
+            h = maxH.rounded(.down)
+            w = (h * 9 / 16).rounded(.down)
+        }
+        let x = screenWidth - w - m
+        let y = m + (maxH - h) / 2
+        return Metrics(width: w, height: h, originX: x, originY: y, margin: m, cornerRadius: cr)
+    }
+
+    static func frame(in visibleFrame: NSRect) -> NSRect {
+        let strip = metrics(screenWidth: visibleFrame.width, screenHeight: visibleFrame.height)
+        return NSRect(
+            x: visibleFrame.minX + strip.originX,
+            y: visibleFrame.minY + strip.originY,
+            width: strip.width,
+            height: strip.height
+        )
+    }
+
+    private static var cachedMask: (key: String, image: CIImage)?
+
+    static func roundedRectMask(rect: CGRect, cornerRadius: CGFloat, translatedTo origin: CGPoint) -> CIImage {
+        let cacheKey = "\(rect)-\(cornerRadius)-\(origin)"
+        if let cached = cachedMask, cached.key == cacheKey { return cached.image }
+
+        let extent = rect.offsetBy(dx: origin.x, dy: origin.y)
+        let w = Int(extent.width.rounded())
+        let h = Int(extent.height.rounded())
+        guard w > 0, h > 0,
+              let colorSpace = CGColorSpace(name: CGColorSpace.linearGray),
+              let ctx = CGContext(
+                data: nil,
+                width: w,
+                height: h,
+                bitsPerComponent: 8,
+                bytesPerRow: w,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+              ) else {
+            return CIImage(color: .white).cropped(to: extent)
+        }
+
+        ctx.setFillColor(gray: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.setFillColor(gray: 1, alpha: 1)
+        let path = CGPath(
+            roundedRect: CGRect(x: 0, y: 0, width: rect.width, height: rect.height),
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+        ctx.addPath(path)
+        ctx.fillPath()
+
+        guard let cgImage = ctx.makeImage() else {
+            return CIImage(color: .white).cropped(to: extent)
+        }
+        let result = CIImage(cgImage: cgImage)
+            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+            .cropped(to: extent)
+        cachedMask = (key: cacheKey, image: result)
+        return result
+    }
+
+    private static let sharedBlendWithMaskFilter = CIFilter(name: "CIBlendWithMask")
+    private static let sharedSourceOverFilter = CIFilter(name: "CISourceOverCompositing")
+
+    static func compositeWithRoundedMask(
+        _ camera: CIImage,
+        mask: CIImage,
+        over background: CIImage
+    ) -> CIImage? {
+        guard let blendFilter = sharedBlendWithMaskFilter else { return nil }
+        blendFilter.setValue(camera, forKey: kCIInputImageKey)
+        blendFilter.setValue(CIImage(color: .clear), forKey: kCIInputBackgroundImageKey)
+        blendFilter.setValue(mask, forKey: kCIInputMaskImageKey)
+        guard let maskedCam = blendFilter.outputImage else { return nil }
+
+        guard let compositeFilter = sharedSourceOverFilter else { return nil }
+        compositeFilter.setValue(maskedCam, forKey: kCIInputImageKey)
+        compositeFilter.setValue(background, forKey: kCIInputBackgroundImageKey)
+        return compositeFilter.outputImage
+    }
 }
 
 // MARK: - CameraPreviewWindow
@@ -213,7 +254,7 @@ final class CameraPreviewWindow: NSPanel {
         deviceID: String? = nil,
         background: CameraBackgroundStyle = .none
     ) {
-        DispatchQueue.main.async {
+        let present = {
             if let existing = shared,
                existing.currentStyle == style,
                existing.deviceID == deviceID,
@@ -227,6 +268,13 @@ final class CameraPreviewWindow: NSPanel {
             shared = CameraPreviewWindow(style: style, deviceID: deviceID, background: background)
             shared?.startSession()
             shared?.orderFrontRegardless()
+        }
+        if Thread.isMainThread {
+            present()
+        } else {
+            DispatchQueue.main.async {
+                present()
+            }
         }
     }
 
@@ -250,6 +298,7 @@ final class CameraPreviewWindow: NSPanel {
     private let videoOutput = AVCaptureVideoDataOutput()
     private let outputQueue = DispatchQueue(label: "com.snipsnap.cameraPreview", qos: .userInitiated)
     private let backgroundProcessor = CameraBackgroundProcessor()
+    private lazy var previewCIContext = CIContext(options: [.useSoftwareRenderer: false])
     private weak var previewView: CameraPreviewDisplayView?
 
     // MARK: Style
@@ -275,7 +324,7 @@ final class CameraPreviewWindow: NSPanel {
             let origin = CameraPreviewWindow.squareOrigin(size: 100, inset: 24)
             initialFrame = NSRect(origin: origin, size: CGSize(width: 100, height: 100))
         case .vertical:
-            initialFrame = CameraPreviewWindow.verticalFrame()
+            initialFrame = VerticalCameraStripLayout.frame(in: NSScreen.main?.visibleFrame ?? .zero)
         }
 
         super.init(
@@ -327,7 +376,7 @@ final class CameraPreviewWindow: NSPanel {
     }
 
     private func buildVerticalContent() {
-        let frame = CameraPreviewWindow.verticalFrame()
+        let frame = VerticalCameraStripLayout.frame(in: NSScreen.main?.visibleFrame ?? .zero)
         let container = CameraVerticalView(
             frame: NSRect(origin: .zero, size: frame.size)
         )
@@ -401,15 +450,17 @@ final class CameraPreviewWindow: NSPanel {
 
     private func startSession() {
         guard !session.isRunning else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.startRunning()
+        let captureSession = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            captureSession.startRunning()
         }
     }
 
     private func stopSession() {
         guard session.isRunning else { return }
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            self?.session.stopRunning()
+        let captureSession = session
+        DispatchQueue.global(qos: .userInitiated).async {
+            captureSession.stopRunning()
         }
     }
 
@@ -421,14 +472,6 @@ final class CameraPreviewWindow: NSPanel {
         return CGPoint(x: vis.maxX - size - inset, y: vis.minY + inset)
     }
 
-    private static func verticalFrame() -> NSRect {
-        guard let screen = NSScreen.main else { return .zero }
-        let vis = screen.visibleFrame
-        let margin: CGFloat = 20
-        let w = (vis.width / 4).rounded()
-        let h = vis.height - margin * 2
-        return NSRect(x: vis.maxX - w - margin, y: vis.minY + margin, width: w, height: h)
-    }
 }
 
 // MARK: - AVCaptureVideoDataOutputSampleBufferDelegate
@@ -445,8 +488,7 @@ extension CameraPreviewWindow: AVCaptureVideoDataOutputSampleBufferDelegate {
             let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
                 .transformed(by: CGAffineTransform(scaleX: -1, y: 1)
                     .translatedBy(x: -CGFloat(CVPixelBufferGetWidth(pixelBuffer)), y: 0))
-            let context = CIContext()
-            guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
+            guard let cgImage = previewCIContext.createCGImage(ciImage, from: ciImage.extent) else { return }
             DispatchQueue.main.async { [weak self] in
                 self?.previewView?.update(image: cgImage)
             }
@@ -515,7 +557,6 @@ private final class CameraSquareView: NSView {
     override func layout() {
         super.layout()
         guard let root = layer else { return }
-        root.frame = bounds
         root.cornerRadius = cornerRadius
         root.masksToBounds = true
         root.shadowColor = NSColor.black.cgColor
@@ -555,8 +596,6 @@ private final class CameraSquareView: NSView {
 /// A tall vertical strip that clips the camera feed to a rounded rectangle.
 private final class CameraVerticalView: NSView {
 
-    private let clipCornerRadius: CGFloat = 24
-
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -570,8 +609,8 @@ private final class CameraVerticalView: NSView {
     override func layout() {
         super.layout()
         guard let root = layer else { return }
-        root.frame = bounds
-        root.cornerRadius = clipCornerRadius
+        root.cornerRadius = VerticalCameraStripLayout.cornerRadius
+        root.cornerCurve = .continuous
         root.masksToBounds = true
         root.shadowColor = NSColor.black.cgColor
         root.shadowOpacity = 0.55

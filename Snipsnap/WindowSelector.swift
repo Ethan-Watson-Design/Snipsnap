@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import ApplicationServices
 import ScreenCaptureKit
 
 // MARK: - Entry point
@@ -28,6 +29,47 @@ final class WindowSelector {
         let title = window.title ?? ""
         if title.isEmpty { return app }
         return "\(app) — \(title)"
+    }
+
+    /// Brings the owning app (and window, when accessibility allows) to the front.
+    static func activateWindow(_ windowID: CGWindowID) async {
+        let windows = await fetchRecordableWindows()
+        guard let window = windows.first(where: { $0.windowID == windowID }),
+              let pid = window.owningApplication?.processID else { return }
+
+        await MainActor.run {
+            _ = NSRunningApplication(processIdentifier: pid_t(pid))?.activate()
+        }
+
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        await MainActor.run {
+            raiseWindow(pid: pid_t(pid), title: window.title)
+        }
+    }
+
+    private static func raiseWindow(pid: pid_t, title: String?) {
+        let appRef = AXUIElementCreateApplication(pid)
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appRef, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement],
+              !windows.isEmpty else { return }
+
+        let target: AXUIElement?
+        if let title, !title.isEmpty {
+            target = windows.first { win in
+                var titleValue: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleValue) == .success else {
+                    return false
+                }
+                return (titleValue as? String) == title
+            } ?? windows.first
+        } else {
+            target = windows.first
+        }
+
+        if let target {
+            AXUIElementPerformAction(target, kAXRaiseAction as CFString)
+        }
     }
 
     static func defaultWindowID(from windows: [SCWindow]) -> CGWindowID? {

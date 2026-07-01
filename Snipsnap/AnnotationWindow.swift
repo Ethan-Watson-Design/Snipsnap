@@ -712,7 +712,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     }
 
     private func drawRectSelectionHandles(rect: CGRect, in ctx: CGContext) {
-        let radius: CGFloat = 5
+        let armLength: CGFloat = 14
         let accent = NSColor.annotationSelectionAccent
 
         ctx.saveGState()
@@ -720,15 +720,30 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         ctx.setLineWidth(1.5)
         ctx.stroke(rect)
 
-        for point in rectCornerPoints(in: rect) {
-            let handleRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
-            ctx.setFillColor(NSColor.white.cgColor)
-            ctx.fillEllipse(in: handleRect)
-            ctx.setStrokeColor(accent.cgColor)
-            ctx.setLineWidth(1.5)
-            ctx.strokeEllipse(in: handleRect.insetBy(dx: 0.5, dy: 0.5))
-        }
+        ctx.setLineCap(.square)
+        ctx.setLineWidth(3)
+        ctx.setStrokeColor(NSColor.white.cgColor)
+        addCornerBrackets(to: rect, armLength: armLength, in: ctx)
+        ctx.strokePath()
         ctx.restoreGState()
+    }
+
+    private func addCornerBrackets(to rect: CGRect, armLength: CGFloat, in ctx: CGContext) {
+        ctx.move(to: CGPoint(x: rect.minX, y: rect.minY + armLength))
+        ctx.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
+        ctx.addLine(to: CGPoint(x: rect.minX + armLength, y: rect.minY))
+
+        ctx.move(to: CGPoint(x: rect.maxX - armLength, y: rect.minY))
+        ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+        ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.minY + armLength))
+
+        ctx.move(to: CGPoint(x: rect.maxX, y: rect.maxY - armLength))
+        ctx.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        ctx.addLine(to: CGPoint(x: rect.maxX - armLength, y: rect.maxY))
+
+        ctx.move(to: CGPoint(x: rect.minX + armLength, y: rect.maxY))
+        ctx.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        ctx.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - armLength))
     }
 
     private func drawTextSelectionHandles(metrics: TextMetrics, in ctx: CGContext) {
@@ -1261,15 +1276,6 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         if lenSq == 0 { return hypot(p.x - a.x, p.y - a.y) }
         let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq))
         return hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
-    }
-
-    private func rectCornerPoints(in rect: CGRect) -> [CGPoint] {
-        [
-            CGPoint(x: rect.minX, y: rect.minY),
-            CGPoint(x: rect.maxX, y: rect.minY),
-            CGPoint(x: rect.maxX, y: rect.maxY),
-            CGPoint(x: rect.minX, y: rect.maxY),
-        ]
     }
 
     private func rectCornerHitTargets(in rect: CGRect) -> [(CGPoint, RectResizeHandle)] {

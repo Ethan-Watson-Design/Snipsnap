@@ -167,7 +167,7 @@ private final class RegionSelectorView: NSView {
             border.lineWidth = 1.5
             border.stroke()
 
-            drawCornerHandles(for: sel, accent: accent)
+            drawCornerHandles(for: sel)
             drawSizeLabel(for: sel)
             drawInstruction(hasSelection: true)
         } else {
@@ -206,32 +206,31 @@ private final class RegionSelectorView: NSView {
         return convert(windowPoint, from: nil)
     }
 
-    private func drawCornerHandles(for rect: NSRect, accent: NSColor) {
-        let radius: CGFloat = 5
+    private func drawCornerHandles(for rect: NSRect) {
+        let armLength: CGFloat = 14
 
-        for point in cornerPoints(in: rect) {
-            let handleRect = NSRect(
-                x: point.x - radius,
-                y: point.y - radius,
-                width: radius * 2,
-                height: radius * 2
-            )
-            NSColor.white.setFill()
-            NSBezierPath(ovalIn: handleRect).fill()
-            accent.setStroke()
-            let outline = NSBezierPath(ovalIn: handleRect.insetBy(dx: 0.5, dy: 0.5))
-            outline.lineWidth = 1.5
-            outline.stroke()
-        }
-    }
+        NSColor.white.setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 3
+        path.lineCapStyle = .square
 
-    private func cornerPoints(in rect: NSRect) -> [NSPoint] {
-        [
-            NSPoint(x: rect.minX, y: rect.minY),
-            NSPoint(x: rect.maxX, y: rect.minY),
-            NSPoint(x: rect.maxX, y: rect.maxY),
-            NSPoint(x: rect.minX, y: rect.maxY),
-        ]
+        path.move(to: NSPoint(x: rect.minX, y: rect.minY + armLength))
+        path.line(to: NSPoint(x: rect.minX, y: rect.minY))
+        path.line(to: NSPoint(x: rect.minX + armLength, y: rect.minY))
+
+        path.move(to: NSPoint(x: rect.maxX - armLength, y: rect.minY))
+        path.line(to: NSPoint(x: rect.maxX, y: rect.minY))
+        path.line(to: NSPoint(x: rect.maxX, y: rect.minY + armLength))
+
+        path.move(to: NSPoint(x: rect.maxX, y: rect.maxY - armLength))
+        path.line(to: NSPoint(x: rect.maxX, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.maxX - armLength, y: rect.maxY))
+
+        path.move(to: NSPoint(x: rect.minX + armLength, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.minX, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.minX, y: rect.maxY - armLength))
+
+        path.stroke()
     }
 
     private func drawSizeLabel(for rect: NSRect) {

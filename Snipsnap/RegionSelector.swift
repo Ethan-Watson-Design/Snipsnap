@@ -150,30 +150,39 @@ private final class RegionSelectorView: NSView {
 
     // MARK: Drawing
 
+    private let dimmingAlpha: CGFloat = 0.38
+
     override func draw(_ dirtyRect: NSRect) {
         guard NSGraphicsContext.current != nil else { return }
 
         if let sel = selectionRect, sel.size.width > 1, sel.size.height > 1 {
-            let tintPath = NSBezierPath(rect: bounds)
-            tintPath.append(NSBezierPath(rect: sel))
-            tintPath.windingRule = .evenOdd
-
-            NSColor.black.withAlphaComponent(0.35).setFill()
-            tintPath.fill()
+            fillDimming(outside: sel)
 
             let accent = NSColor.regionSelectionAccent
             accent.setStroke()
             let border = NSBezierPath(rect: sel)
-            border.lineWidth = 1.5
+            border.lineWidth = 1
             border.stroke()
 
             drawCornerHandles(for: sel)
             drawSizeLabel(for: sel)
             drawInstruction(hasSelection: true)
         } else {
-            NSColor.black.withAlphaComponent(0.35).setFill()
-            NSBezierPath(rect: bounds).fill()
+            fillDimming(outside: nil)
             drawInstruction(hasSelection: false)
+        }
+    }
+
+    private func fillDimming(outside selection: NSRect?) {
+        if let selection {
+            let tintPath = NSBezierPath(rect: bounds)
+            tintPath.append(NSBezierPath(rect: selection))
+            tintPath.windingRule = .evenOdd
+            NSColor.black.withAlphaComponent(dimmingAlpha).setFill()
+            tintPath.fill()
+        } else {
+            NSColor.black.withAlphaComponent(dimmingAlpha).setFill()
+            NSBezierPath(rect: bounds).fill()
         }
     }
 
@@ -187,7 +196,7 @@ private final class RegionSelectorView: NSView {
             text = "Drag to select a region  ·  Esc to cancel"
         }
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .font: NSFont.snipsnap(.title),
             .foregroundColor: NSColor.white
         ]
         let size = (text as NSString).size(withAttributes: attrs)
@@ -209,9 +218,9 @@ private final class RegionSelectorView: NSView {
     private func drawCornerHandles(for rect: NSRect) {
         let armLength: CGFloat = 14
 
-        NSColor.white.setStroke()
+        NSColor.regionSelectionAccent.setStroke()
         let path = NSBezierPath()
-        path.lineWidth = 3
+        path.lineWidth = 2
         path.lineCapStyle = .square
 
         path.move(to: NSPoint(x: rect.minX, y: rect.minY + armLength))
@@ -243,7 +252,7 @@ private final class RegionSelectorView: NSView {
         let label = "\(pw) × \(ph)"
 
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+            .font: NSFont.monospacedDigitSystemFont(ofSize: DesignTokens.Typography.caption.size, weight: .medium),
             .foregroundColor: NSColor.white,
         ]
         let str = NSAttributedString(string: label, attributes: attrs)
@@ -285,6 +294,7 @@ private final class RegionSelectorView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let current = convert(event.locationInWindow, from: nil)
+        let freeform = event.modifierFlags.contains(.command)
 
         switch dragMode {
         case .none:
@@ -292,20 +302,27 @@ private final class RegionSelectorView: NSView {
 
         case .creating:
             guard let start = startPoint else { return }
-            selectionRect = clamped(rectBetween(start, current))
+            let a = snapPoint(start, freeform: freeform)
+            let b = snapPoint(current, freeform: freeform)
+            selectionRect = clamped(rectBetween(a, b), freeform: freeform)
             needsDisplay = true
 
         case .moving(let origin, let start):
             let dx = current.x - start.x
             let dy = current.y - start.y
             var moved = origin.offsetBy(dx: dx, dy: dy)
+            moved.origin = snapPoint(moved.origin, freeform: freeform)
             moved = clampedToBounds(moved)
             selectionRect = moved
             needsDisplay = true
             if mode == .interactive { notifySelectionChange() }
 
         case .resizing(let handle, let anchor):
-            selectionRect = clamped(resizedRect(anchor: anchor, handle: handle, to: current))
+            let target = snapPoint(current, freeform: freeform)
+            selectionRect = clamped(
+                resizedRect(anchor: anchor, handle: handle, to: target, freeform: freeform),
+                freeform: freeform
+            )
             needsDisplay = true
             if mode == .interactive { notifySelectionChange() }
         }
@@ -435,6 +452,25 @@ private final class RegionSelectorView: NSView {
         resetCursorRects()
     }
 
+    /// Snap step in physical pixels (matches the size label units).
+    private let snapPixels: CGFloat = 10
+
+    /// Points-per-snap, accounting for Retina so the grid is 10px not 10pt.
+    private var snapInterval: CGFloat {
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        return snapPixels / scale
+    }
+
+    /// Snaps to a 10px grid unless ⌘ is held for pixel-precise selection.
+    private func snapPoint(_ point: NSPoint, freeform: Bool) -> NSPoint {
+        guard !freeform else { return point }
+        let step = snapInterval
+        return NSPoint(
+            x: (point.x / step).rounded() * step,
+            y: (point.y / step).rounded() * step
+        )
+    }
+
     private func rectBetween(_ a: NSPoint, _ b: NSPoint) -> NSRect {
         NSRect(
             x: min(a.x, b.x),
@@ -444,9 +480,9 @@ private final class RegionSelectorView: NSView {
         )
     }
 
-    private func clamped(_ rect: NSRect) -> NSRect {
+    private func clamped(_ rect: NSRect, freeform: Bool = false) -> NSRect {
         var r = rect
-        let minSize: CGFloat = 20
+        let minSize: CGFloat = freeform ? 1 : snapInterval * 2
         r.size.width = max(r.size.width, minSize)
         r.size.height = max(r.size.height, minSize)
         return clampedToBounds(r)
@@ -515,8 +551,13 @@ private final class RegionSelectorView: NSView {
         return nil
     }
 
-    private func resizedRect(anchor: NSRect, handle: ResizeHandle, to point: NSPoint) -> NSRect {
-        let minSize: CGFloat = 20
+    private func resizedRect(
+        anchor: NSRect,
+        handle: ResizeHandle,
+        to point: NSPoint,
+        freeform: Bool
+    ) -> NSRect {
+        let minSize: CGFloat = freeform ? 1 : snapInterval * 2
         var minX = anchor.minX
         var minY = anchor.minY
         var maxX = anchor.maxX
@@ -548,3 +589,4 @@ private final class RegionSelectorView: NSView {
         return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 }
+

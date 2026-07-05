@@ -199,7 +199,7 @@ private final class WindowSelectorView: NSView {
     private func drawInstruction() {
         let text = "Click a window to record  ·  Esc to cancel"
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 14, weight: .medium),
+            .font: NSFont.snipsnap(.title),
             .foregroundColor: NSColor.white
         ]
         let size = (text as NSString).size(withAttributes: attrs)
@@ -212,7 +212,7 @@ private final class WindowSelectorView: NSView {
 
     private func drawLabel(_ text: String, near rect: NSRect) {
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .font: NSFont.snipsnap(.label),
             .foregroundColor: NSColor.white
         ]
         let size = (text as NSString).size(withAttributes: attrs)
@@ -222,7 +222,7 @@ private final class WindowSelectorView: NSView {
         )
         let bg = NSRect(x: origin.x - 6, y: origin.y - 2, width: size.width + 12, height: size.height + 4)
         NSColor.black.withAlphaComponent(0.55).setFill()
-        NSBezierPath(roundedRect: bg, xRadius: 4, yRadius: 4).fill()
+        NSBezierPath(roundedRect: bg, xRadius: DesignTokens.Radius.sm, yRadius: DesignTokens.Radius.sm).fill()
         (text as NSString).draw(at: origin, withAttributes: attrs)
     }
 

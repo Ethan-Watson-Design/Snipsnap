@@ -86,7 +86,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
     static func open(_ entry: CaptureEntry) {
         switch entry.item {
         case .screenshot(let image):
-            AnnotationWindow.show(image: image)
+            AnnotationWindow.show(image: image, fileName: entry.displayName, captureID: entry.id)
         case .recording(let url, let thumbnail):
             VideoAnnotationWindow.show(url: url, thumbnail: thumbnail)
         }
@@ -170,19 +170,19 @@ private struct CaptureSidebarRow: View {
     let entry: CaptureEntry
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: DesignTokens.Spacing.md) {
             Image(nsImage: entry.thumbnail)
                 .resizable()
                 .aspectRatio(contentMode: .fill)
                 .frame(width: 44, height: 32)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.displayName)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.snipsnap(.body))
                 Text(entry.createdAt.compactRelativeLabel)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
+                    .font(.snipsnap(.caption))
+                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
             }
         }
         .padding(.vertical, 2)
@@ -197,17 +197,17 @@ private struct CapturePreviewPane: View {
         VStack(spacing: 0) {
             previewContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
+                .background(DesignTokens.Color.background.swiftUI)
 
             Divider()
 
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(entry.displayName)
-                        .font(.headline)
+                        .font(.snipsnap(.bodyEmphasized))
                     Text(entry.createdAt.compactRelativeLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(.snipsnap(.caption))
+                        .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
                 }
 
                 Spacer()
@@ -217,7 +217,7 @@ private struct CapturePreviewPane: View {
                 }
                 .keyboardShortcut(.return, modifiers: [])
             }
-            .padding(16)
+            .padding(DesignTokens.Spacing.lg)
         }
     }
 
@@ -228,11 +228,11 @@ private struct CapturePreviewPane: View {
             Image(nsImage: image)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
-                .padding(24)
+                .padding(DesignTokens.Spacing.xl)
 
         case .recording(let url, _):
             VideoPreviewRepresentable(url: url)
-                .padding(24)
+                .padding(DesignTokens.Spacing.xl)
         }
     }
 }

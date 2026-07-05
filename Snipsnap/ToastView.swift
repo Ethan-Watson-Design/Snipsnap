@@ -25,6 +25,15 @@ final class ToastWindow: NSWindow {
         }
     }
 
+    static func show(message: String) {
+        DispatchQueue.main.async {
+            current?.cancelAndClose()
+            let window = ToastWindow(message: message)
+            current = window
+            window.presentAnimated()
+        }
+    }
+
     // MARK: - Init
 
     private init(image: NSImage, onTap: @escaping () -> Void) {
@@ -58,12 +67,36 @@ final class ToastWindow: NSWindow {
         contentView.addGestureRecognizer(click)
     }
 
+    private init(message: String) {
+        self.onTap = {}
+
+        super.init(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = true
+        level = .floating
+        isMovableByWindowBackground = false
+        collectionBehavior = [.canJoinAllSpaces, .stationary]
+        isReleasedWhenClosed = false
+
+        let (contentView, contentSize) = ToastWindow.makeMessageContent(message: message)
+        self.contentView = contentView
+
+        positionBottomCenter(contentSize: contentSize)
+    }
+
     // MARK: - Layout helpers
 
     private static func layoutSize(for image: NSImage) -> NSSize {
         let maxW: CGFloat = 240
         let maxH: CGFloat = 140
-        let padding: CGFloat = 12
+        let padding = DesignTokens.Spacing.md
 
         let imgSize = image.size
         let scale = min(maxW / imgSize.width, maxH / imgSize.height, 1.0)
@@ -75,8 +108,52 @@ final class ToastWindow: NSWindow {
         return NSSize(width: totalW, height: totalH)
     }
 
+    private static let messageFont = NSFont.snipsnap(.body)
+    private static let messagePadding = NSEdgeInsets(
+        top: 10,
+        left: DesignTokens.Spacing.lg,
+        bottom: 10,
+        right: DesignTokens.Spacing.lg
+    )
+
+    private static func messageLabel(for message: String) -> NSTextField {
+        let label = NSTextField(labelWithString: message)
+        label.font = messageFont
+        label.textColor = DesignTokens.Color.textPrimary.ns
+        label.alignment = .center
+        label.lineBreakMode = .byClipping
+        label.cell?.wraps = false
+        label.cell?.truncatesLastVisibleLine = false
+        return label
+    }
+
+    private static func makeMessageContent(message: String) -> (view: NSView, size: NSSize) {
+        let padding = messagePadding
+        let label = messageLabel(for: message)
+        label.sizeToFit()
+
+        let textW = ceil(label.frame.width)
+        let textH = ceil(label.frame.height)
+        let size = NSSize(
+            width: textW + padding.left + padding.right,
+            height: textH + padding.top + padding.bottom
+        )
+
+        let vfx = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
+        vfx.material = .hudWindow
+        vfx.blendingMode = .behindWindow
+        vfx.state = .active
+        vfx.wantsLayer = true
+        vfx.layer?.cornerRadius = DesignTokens.Radius.lg
+        vfx.layer?.masksToBounds = true
+
+        label.frame = NSRect(x: padding.left, y: padding.bottom, width: textW, height: textH)
+        vfx.addSubview(label)
+        return (vfx, size)
+    }
+
     private func buildContentView(image: NSImage, size: NSSize) -> NSView {
-        let padding: CGFloat = 12
+        let padding = DesignTokens.Spacing.md
 
         // Frosted glass background
         let vfx = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
@@ -84,7 +161,7 @@ final class ToastWindow: NSWindow {
         vfx.blendingMode = .behindWindow
         vfx.state = .active
         vfx.wantsLayer = true
-        vfx.layer?.cornerRadius = 12
+        vfx.layer?.cornerRadius = DesignTokens.Radius.lg
         vfx.layer?.masksToBounds = true
 
         // Thumbnail
@@ -96,7 +173,7 @@ final class ToastWindow: NSWindow {
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.imageAlignment = .alignCenter
         imageView.wantsLayer = true
-        imageView.layer?.cornerRadius = 6
+        imageView.layer?.cornerRadius = DesignTokens.Radius.sm
         imageView.layer?.masksToBounds = true
 
         vfx.addSubview(imageView)
@@ -109,6 +186,17 @@ final class ToastWindow: NSWindow {
         let visibleRect = screen.visibleFrame
         let origin = NSPoint(
             x: visibleRect.maxX - contentSize.width - margin,
+            y: visibleRect.minY + margin
+        )
+        setFrame(NSRect(origin: origin, size: contentSize), display: false)
+    }
+
+    private func positionBottomCenter(contentSize: NSSize) {
+        guard let screen = NSScreen.main else { return }
+        let margin: CGFloat = 20
+        let visibleRect = screen.visibleFrame
+        let origin = NSPoint(
+            x: visibleRect.midX - contentSize.width / 2,
             y: visibleRect.minY + margin
         )
         setFrame(NSRect(origin: origin, size: contentSize), display: false)

@@ -59,7 +59,7 @@ final class SettingsWindow: NSWindow {
 
     private init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 270),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 300),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -67,7 +67,7 @@ final class SettingsWindow: NSWindow {
         title = "Snipsnap Settings"
         isReleasedWhenClosed = false
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 270))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
         self.contentView = contentView
 
         buildContent(in: contentView)
@@ -75,14 +75,14 @@ final class SettingsWindow: NSWindow {
 
     private func buildContent(in parent: NSView) {
         let width: CGFloat = 380
-        let height: CGFloat = 270
+        let height: CGFloat = 300
         let sideMargin: CGFloat = 20
         let rowHeight: CGFloat = 44
 
         // "Save Location" section
         let destHeader = NSTextField(labelWithString: "SAVE LOCATION")
-        destHeader.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        destHeader.textColor = .secondaryLabelColor
+        destHeader.font = NSFont.snipsnap(.caption)
+        destHeader.textColor = DesignTokens.Color.textSecondary.ns
         destHeader.frame = NSRect(x: sideMargin, y: height - 32, width: width - sideMargin * 2, height: 16)
         parent.addSubview(destHeader)
 
@@ -92,14 +92,14 @@ final class SettingsWindow: NSWindow {
         let destRowY = height - 36 - rowHeight
 
         let destLabel = NSTextField(labelWithString: "Save to")
-        destLabel.font = NSFont.systemFont(ofSize: 13)
-        destLabel.textColor = .labelColor
+        destLabel.font = NSFont.snipsnap(.body)
+        destLabel.textColor = DesignTokens.Color.textPrimary.ns
         destLabel.frame = NSRect(x: sideMargin, y: destRowY + (rowHeight - 16) / 2, width: 52, height: 16)
         parent.addSubview(destLabel)
 
         destinationPathLabel = NSTextField(labelWithString: AppSettings.destinationFolderDisplayPath)
-        destinationPathLabel.font = NSFont.systemFont(ofSize: 13)
-        destinationPathLabel.textColor = .secondaryLabelColor
+        destinationPathLabel.font = NSFont.snipsnap(.body)
+        destinationPathLabel.textColor = DesignTokens.Color.textSecondary.ns
         destinationPathLabel.lineBreakMode = .byTruncatingMiddle
         destinationPathLabel.frame = NSRect(
             x: sideMargin + 58,
@@ -121,8 +121,8 @@ final class SettingsWindow: NSWindow {
         let shortcutsTop = destRowY - 36
 
         let header = NSTextField(labelWithString: "SHORTCUTS")
-        header.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-        header.textColor = .secondaryLabelColor
+        header.font = NSFont.snipsnap(.caption)
+        header.textColor = DesignTokens.Color.textSecondary.ns
         header.frame = NSRect(x: sideMargin, y: shortcutsTop + 4, width: width - sideMargin * 2, height: 16)
         parent.addSubview(header)
 
@@ -130,8 +130,8 @@ final class SettingsWindow: NSWindow {
         parent.addSubview(topSep)
 
         let shortcuts: [(String, [String])] = [
-            ("Region Screenshot", ["⌘", "⇧", "2"]),
-            ("Start Recording",   ["⌘", "⇧", "4"]),
+            ("Snap Area",       ["⌘", "⇧", "3"]),
+            ("Record Screen",   ["⌘", "⇧", "4"]),
             ("Clip Voice",        ["⌘", "⇧", "5"]),
         ]
 
@@ -141,8 +141,8 @@ final class SettingsWindow: NSWindow {
             let rowY = rowTop - rowHeight
 
             let left = NSTextField(labelWithString: label)
-            left.font = NSFont.systemFont(ofSize: 13)
-            left.textColor = .labelColor
+            left.font = NSFont.snipsnap(.body)
+            left.textColor = DesignTokens.Color.textPrimary.ns
             left.frame = NSRect(x: sideMargin, y: rowY + (rowHeight - 16) / 2, width: 200, height: 16)
             parent.addSubview(left)
 
@@ -162,9 +162,28 @@ final class SettingsWindow: NSWindow {
             rowTop = rowY
         }
 
+        let accessibilityLink = NSButton(
+            title: "Open Accessibility Settings for Snipsnap…",
+            target: self,
+            action: #selector(openAccessibilitySettings)
+        )
+        accessibilityLink.bezelStyle = .inline
+        accessibilityLink.isBordered = false
+        accessibilityLink.font = NSFont.snipsnap(.caption)
+        accessibilityLink.contentTintColor = .linkColor
+        accessibilityLink.sizeToFit()
+        let linkSize = accessibilityLink.fittingSize
+        accessibilityLink.frame = NSRect(
+            x: (width - linkSize.width) / 2,
+            y: rowTop - 28,
+            width: linkSize.width,
+            height: linkSize.height
+        )
+        parent.addSubview(accessibilityLink)
+
         let note = NSTextField(labelWithString: "Custom shortcuts coming soon")
-        note.font = NSFont.systemFont(ofSize: 11)
-        note.textColor = .tertiaryLabelColor
+        note.font = NSFont.snipsnap(.caption)
+        note.textColor = DesignTokens.Color.textTertiary.ns
         note.alignment = .center
         note.frame = NSRect(x: sideMargin, y: 12, width: width - sideMargin * 2, height: 14)
         parent.addSubview(note)
@@ -172,6 +191,12 @@ final class SettingsWindow: NSWindow {
 
     private func refreshDestinationPathLabel() {
         destinationPathLabel?.stringValue = AppSettings.destinationFolderDisplayPath
+    }
+
+    @objc private func openAccessibilitySettings() {
+        NSWorkspace.shared.open(
+            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        )
     }
 
     @objc private func chooseDestinationFolder() {
@@ -196,21 +221,21 @@ final class SettingsWindow: NSWindow {
     private func separator(y: CGFloat, width: CGFloat) -> NSView {
         let line = NSView(frame: NSRect(x: 0, y: y, width: width, height: 1))
         line.wantsLayer = true
-        line.layer?.backgroundColor = NSColor.separatorColor.cgColor
+        line.layer?.backgroundColor = DesignTokens.Color.border.cg
         return line
     }
 
     private func keyBadge(label: String, origin: NSPoint) -> NSView {
         let container = NSView(frame: NSRect(origin: origin, size: NSSize(width: 24, height: 22)))
         container.wantsLayer = true
-        container.layer?.backgroundColor = NSColor.controlColor.cgColor
-        container.layer?.cornerRadius = 5
+        container.layer?.backgroundColor = DesignTokens.Color.surface.cg
+        container.layer?.cornerRadius = DesignTokens.Radius.sm
         container.layer?.borderWidth = 0.5
-        container.layer?.borderColor = NSColor.separatorColor.cgColor
+        container.layer?.borderColor = DesignTokens.Color.border.cg
 
         let text = NSTextField(labelWithString: label)
-        text.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        text.textColor = .labelColor
+        text.font = NSFont.monospacedSystemFont(ofSize: DesignTokens.Typography.label.size, weight: .regular)
+        text.textColor = DesignTokens.Color.textPrimary.ns
         text.alignment = .center
         text.frame = NSRect(x: 0, y: 3, width: 24, height: 16)
         container.addSubview(text)

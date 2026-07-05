@@ -6,10 +6,17 @@
 //
 
 import AppKit
+import CoreImage
 import ScreenCaptureKit
 
 class ScreenshotEngine {
-    static func captureWindow(_ windowID: CGWindowID, completion: @escaping (NSImage?) -> Void) {
+    private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    static func captureWindow(
+        _ windowID: CGWindowID,
+        background: RecordingBackgroundStyle = .none,
+        completion: @escaping (NSImage?) -> Void
+    ) {
         Task {
             do {
                 let availableContent = try await SCShareableContent.excludingDesktopWindows(
@@ -29,10 +36,35 @@ class ScreenshotEngine {
                 config.scalesToFit = false
 
                 let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
-                let nsImage = NSImage(
-                    cgImage: cgImage,
-                    size: NSSize(width: window.frame.width, height: window.frame.height)
-                )
+                let windowImage = CIImage(cgImage: cgImage)
+
+                let outputImage: CIImage
+                if background == .none {
+                    outputImage = windowImage
+                } else {
+                    let canvasSize = RecordingBackgroundRenderer.canvasSize(for: scale)
+                    outputImage = RecordingBackgroundRenderer.composite(
+                        windowImage: windowImage,
+                        background: background,
+                        canvasSize: canvasSize,
+                        scale: scale
+                    )
+                }
+
+                let extent = outputImage.extent
+                guard let result = ciContext.createCGImage(outputImage, from: extent) else {
+                    DispatchQueue.main.async { completion(nil) }
+                    return
+                }
+
+                let logicalSize: NSSize
+                if background == .none {
+                    logicalSize = NSSize(width: window.frame.width, height: window.frame.height)
+                } else {
+                    logicalSize = RecordingBackgroundRenderer.canvasSize(for: 1)
+                }
+
+                let nsImage = NSImage(cgImage: result, size: logicalSize)
                 DispatchQueue.main.async { completion(nsImage) }
             } catch {
                 DispatchQueue.main.async { completion(nil) }

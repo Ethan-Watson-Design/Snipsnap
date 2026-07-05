@@ -68,12 +68,23 @@ struct CaptureEntry: Identifiable {
     let id: UUID
     let createdAt: Date
     let item: CaptureItem
+    let customName: String?
+
+    init(id: UUID, createdAt: Date, item: CaptureItem, customName: String? = nil) {
+        self.id = id
+        self.createdAt = createdAt
+        self.item = item
+        self.customName = customName
+    }
 
     var thumbnail: NSImage { item.thumbnail }
     var isRecording: Bool { item.isRecording }
     var kindLabel: String { item.kindLabel }
 
     var displayName: String {
+        if let customName, !customName.isEmpty {
+            return customName
+        }
         switch item {
         case .screenshot:
             return CaptureNaming.baseName(at: createdAt)
@@ -137,6 +148,7 @@ final class CaptureHistory {
         let kind: Kind
         let path: String
         let thumbnailPath: String?
+        let customName: String?
     }
 
     private let storageDirectory: URL
@@ -156,14 +168,22 @@ final class CaptureHistory {
         loadFromDisk()
     }
 
-    func add(_ item: CaptureItem) {
+    @discardableResult
+    func add(_ item: CaptureItem) -> CaptureEntry? {
         let entry = CaptureEntry(id: UUID(), createdAt: Date(), item: item)
 
         switch item {
         case .screenshot(let image):
-            guard let path = saveScreenshot(image, at: entry.createdAt) else { return }
+            guard let path = saveScreenshot(image, at: entry.createdAt) else { return nil }
             storedCaptures.insert(
-                StoredCapture(id: entry.id, createdAt: entry.createdAt, kind: .screenshot, path: path.path, thumbnailPath: nil),
+                StoredCapture(
+                    id: entry.id,
+                    createdAt: entry.createdAt,
+                    kind: .screenshot,
+                    path: path.path,
+                    thumbnailPath: nil,
+                    customName: nil
+                ),
                 at: 0
             )
 
@@ -175,7 +195,8 @@ final class CaptureHistory {
                     createdAt: entry.createdAt,
                     kind: .recording,
                     path: url.path,
-                    thumbnailPath: thumbPath?.path
+                    thumbnailPath: thumbPath?.path,
+                    customName: nil
                 ),
                 at: 0
             )
@@ -184,6 +205,7 @@ final class CaptureHistory {
         entries.insert(entry, at: 0)
         trimAndPersist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+        return entry
     }
 
     func entry(at index: Int) -> CaptureEntry? {
@@ -191,11 +213,101 @@ final class CaptureHistory {
         return entries[index]
     }
 
+    func previousScreenshot(excluding id: UUID?) -> (entry: CaptureEntry, image: NSImage)? {
+        for entry in entries {
+            guard entry.id != id else { continue }
+            guard case .screenshot(let image) = entry.item else { continue }
+            return (entry, image)
+        }
+        return nil
+    }
+
+    func screenshotChoices(excluding id: UUID?, limit: Int = 8) -> [(entry: CaptureEntry, image: NSImage)] {
+        var results: [(CaptureEntry, NSImage)] = []
+        for entry in entries {
+            guard entry.id != id else { continue }
+            guard case .screenshot(let image) = entry.item else { continue }
+            results.append((entry, image))
+            if results.count >= limit { break }
+        }
+        return results
+    }
+
     func fileURL(for id: UUID) -> URL? {
         guard let stored = storedCaptures.first(where: { $0.id == id }) else { return nil }
         let url = URL(fileURLWithPath: stored.path)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
+    }
+
+    @discardableResult
+    func replaceScreenshot(id: UUID, with image: NSImage) -> Bool {
+        guard let storedIndex = storedCaptures.firstIndex(where: { $0.id == id }),
+              storedCaptures[storedIndex].kind == .screenshot,
+              let entryIndex = entries.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let url = URL(fileURLWithPath: storedCaptures[storedIndex].path)
+        guard writePNG(image, to: url) else { return false }
+
+        let entry = entries[entryIndex]
+        entries[entryIndex] = CaptureEntry(
+            id: entry.id,
+            createdAt: entry.createdAt,
+            item: .screenshot(image),
+            customName: entry.customName
+        )
+        NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+        return true
+    }
+
+    @discardableResult
+    func renameCapture(id: UUID, to newName: String) -> Bool {
+        let sanitized = Self.sanitizedBaseName(newName)
+        guard !sanitized.isEmpty else { return false }
+        guard let storedIndex = storedCaptures.firstIndex(where: { $0.id == id }),
+              let entryIndex = entries.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let stored = storedCaptures[storedIndex]
+        let oldURL = URL(fileURLWithPath: stored.path)
+        let ext = oldURL.pathExtension
+        let newURL = oldURL.deletingLastPathComponent().appendingPathComponent("\(sanitized).\(ext)")
+
+        if oldURL != newURL {
+            let fileManager = FileManager.default
+            if fileManager.fileExists(atPath: newURL.path) {
+                return false
+            }
+            do {
+                try fileManager.moveItem(at: oldURL, to: newURL)
+            } catch {
+                return false
+            }
+        }
+
+        let updatedStored = StoredCapture(
+            id: stored.id,
+            createdAt: stored.createdAt,
+            kind: stored.kind,
+            path: newURL.path,
+            thumbnailPath: stored.thumbnailPath,
+            customName: sanitized
+        )
+        storedCaptures[storedIndex] = updatedStored
+
+        let entry = entries[entryIndex]
+        entries[entryIndex] = CaptureEntry(
+            id: entry.id,
+            createdAt: entry.createdAt,
+            item: entry.item,
+            customName: sanitized
+        )
+        persist()
+        NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+        return true
     }
 
     func remove(id: UUID) {
@@ -237,7 +349,8 @@ final class CaptureHistory {
                     createdAt: Date().addingTimeInterval(-Double(index) * 60),
                     kind: StoredCapture.Kind(rawValue: entry.kind.rawValue) ?? .screenshot,
                     path: entry.path,
-                    thumbnailPath: entry.thumbnailPath
+                    thumbnailPath: entry.thumbnailPath,
+                    customName: nil
                 )
             )
         }
@@ -251,7 +364,14 @@ final class CaptureHistory {
 
         for entry in stored {
             guard let item = captureItem(from: entry) else { continue }
-            loadedEntries.append(CaptureEntry(id: entry.id, createdAt: entry.createdAt, item: item))
+            loadedEntries.append(
+                CaptureEntry(
+                    id: entry.id,
+                    createdAt: entry.createdAt,
+                    item: item,
+                    customName: entry.customName
+                )
+            )
             validStored.append(entry)
         }
 
@@ -336,22 +456,37 @@ final class CaptureHistory {
 
     // MARK: - File helpers
 
-    private func saveScreenshot(_ image: NSImage, at date: Date) -> URL? {
-        guard let tiff = image.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff),
-              let png = bitmap.representation(using: .png, properties: [:]) else {
-            return nil
-        }
+    private static func sanitizedBaseName(_ name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let invalid = CharacterSet(charactersIn: ":/\\")
+        return trimmed
+            .components(separatedBy: invalid)
+            .filter { !$0.isEmpty }
+            .joined(separator: "-")
+    }
 
+    private func saveScreenshot(_ image: NSImage, at date: Date) -> URL? {
         let url = CaptureNaming.uniqueURL(
             in: storageDirectory,
             preferredFilename: CaptureNaming.screenshotFilename(at: date)
         )
+        guard writePNG(image, to: url) else { return nil }
+        return url
+    }
+
+    private func writePNG(_ image: NSImage, to url: URL) -> Bool {
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else {
+            return false
+        }
+
         do {
             try png.write(to: url, options: .atomic)
-            return url
+            return true
         } catch {
-            return nil
+            return false
         }
     }
 

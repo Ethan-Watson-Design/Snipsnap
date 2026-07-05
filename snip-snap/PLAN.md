@@ -17,7 +17,9 @@ A free, native-feeling macOS capture tool. Screenshots, screen recording, FigJam
 | **Min macOS** | 13.0 (Ventura) |
 | **Distribution** | Direct (not App Store) |
 | **Pricing** | Free |
-| **Save location** | User picks during onboarding (no default) |
+| **Save location** | User picks a root folder during onboarding; Snipsnap auto-organizes into product-named subfolders beneath it (see Dynamic Save Location below) |
+| **Auto-organize analysis** | On-device only — app/window metadata + Vision OCR, no cloud calls, nothing leaves the Mac |
+| **Auto-organize behavior** | Suggest, user confirms — file saves immediately, a toast chip proposes the folder, one tap to move it |
 | **Default output** | Auto-copy to clipboard + save to folder + toast preview |
 | **Toast behavior** | Click toast → opens annotation window |
 | **Recording audio** | Screen only by default; mic opt-in; system audio opt-in |
@@ -63,6 +65,29 @@ Deprioritized for now: tutorial/step-by-step documentation (needs numbered step 
 **Design decisions this produced:**
 - No dedicated rigid arrow-only primitive. Explain-focused use cases (2, part of 1) are served by anchored text/callouts; point-focused use cases (1, 3) are served by Rectangle/Highlighter (circle-the-region) plus the new Spotlight tool below — arrow semantics (directional pointing) weren't actually the load-bearing need once the three use cases were made explicit.
 - Spotlight ships with all three suppression techniques (dim / blur / desaturate) as a per-annotation setting rather than picking one — precision-first use cases (1, 2) favor Dim + hard edge; polish-first use case (3) is the one place Blur or Desaturate earn their extra cost.
+
+---
+
+## MVP Scope & Use Cases (2026-07-05)
+
+**Who's using it:** designers, engineers, marketing, and product people who need to show or explain a digital product or their own work to someone else.
+
+**Top two use cases, in priority order:**
+
+| # | Use case | Shape |
+|---|----------|-------|
+| 1 | "Hey, look at this" | Show a tool, feature, or piece of work — screenshot/recording is the point |
+| 2 | "This is why X" | Explain a decision or reasoning — sometimes just text, screenshot is supporting evidence |
+
+**Format:** Both use cases apply to screenshots and recordings, but **MVP is screenshot-first** — recording keeps working (already built through v0.6) but isn't the MVP gate.
+
+**Two flagship features for v1.0 MVP:**
+1. The screenshot → annotate → share loop above.
+2. **Dynamic Save Location (Auto-Organize)** — on-device analysis of each capture proposes a product-named (sub)folder, so a person capturing across many tools ends up with a self-sorting library instead of a flat dump. Full spec below.
+
+**Deprioritized for MVP, not off the table:** background images and other secondary capture/output tools (open to adding more here post-MVP).
+
+This sits above the annotation-need breakdown in "Priority Use Cases & Competitive Positioning" above — that section is about what a screenshot needs once you're in it (precise pointing, anchored text, polish); this section is about who's opening Snipsnap and why in the first place. The two aren't in conflict: bug reports/QA and design feedback are both flavors of "hey, look at this."
 
 ---
 
@@ -134,12 +159,42 @@ Spotlight-style text panel that coexists with or replaces the visual Capture Bar
 ## Post-Capture Flow
 
 1. Capture fires (screenshot or clip)
-2. File auto-saved to user's chosen folder
+2. File auto-saved to user's chosen root folder (never blocks on analysis — see Dynamic Save Location below)
 3. Image auto-copied to clipboard
-4. Toast appears bottom-right (thumbnail + filename, 4s timeout)
-5. Clicking toast → opens Annotation Window
-6. Annotation Window: full capture with floating toolbar, FigJam-style
-7. Escape or ✓ button → copies annotated version to clipboard, dismisses
+4. On-device analysis runs in the background and, if confident, attaches a suggested destination to the toast
+5. Toast appears bottom-right (thumbnail + filename + suggested-folder chip if one was found, 4s timeout — extends slightly if a chip is showing so it isn't missed)
+6. Clicking the thumbnail → opens Annotation Window. Clicking the folder chip → moves the file into the suggested (sub)folder, creating it if needed
+7. Annotation Window: full capture with floating toolbar, FigJam-style
+8. Escape or ✓ button → copies annotated version to clipboard, dismisses
+
+---
+
+## Dynamic Save Location (Auto-Organize)
+
+**Concept:** instead of every capture landing in one flat folder, Snipsnap figures out *what product or tool* a capture is of and proposes a home for it — a top-level folder per product, nested and reused automatically as more captures come in. The goal: someone doing "screenshot everything I look at across a dozen tools" ends up with a self-sorting folder tree instead of a junk drawer, without ever opening Finder.
+
+**Priority:** MVP, alongside the screenshot-first flow — this is the second flagship feature for v1.0, not a post-launch nice-to-have.
+
+**Analysis approach — on-device only, no cloud calls, nothing leaves the Mac:**
+- **Primary signal — app/window metadata (free, deterministic):** at capture time, read the frontmost app's bundle identifier and window title (ScreenCaptureKit / Accessibility APIs already have this). "Figma," "Google Chrome — Linear," "Xcode" are strong, reliable product names with zero image analysis needed.
+- **Secondary signal — Vision framework OCR (on-device):** run text recognition on the captured image to pull page/section names, headings, or button labels visible on screen (e.g. "Design System," "Settings," "Pricing"). Used to propose a *subfolder* under the primary product folder, and to disambiguate generic window titles (e.g. a browser tab titled "New Tab").
+- No CoreML classifier needed for v1 — app metadata + OCR text covers "what product" and "what part of it" without training or bundling a model.
+
+**Behavior (suggest, user confirms):**
+1. File saves immediately to the root folder the user picked in onboarding — capture speed never waits on analysis.
+2. Analysis runs in the background (should resolve well within the toast's visible window).
+3. If confident, the toast grows a folder chip: `→ Figma / Design System`. Tapping it creates the folder path if it doesn't exist and moves the file there.
+4. If the user ignores the chip, the file simply stays where it landed — nothing is silently moved without a tap.
+5. Confirmed product → folder mappings are remembered (same "recents" pattern as stroke color / Spotlight technique), so the same app/window-title pattern gets suggested consistently next time without needing OCR to re-confirm it.
+6. Folder tree grows organically: `<root>/Figma/Design System/`, `<root>/Chrome — github.com/`, etc. — created on demand, never pre-generated.
+
+**Scope:** applies to both screenshots and recordings (same capture pipeline, same metadata available at capture time) — screenshots remain the priority surface to polish first, but there's no separate implementation needed to cover recordings once this ships.
+
+**Data model:** `CaptureDestination { productFolder: String, subfolder: String?, confidence: Double, source: .windowMetadata | .ocr }`. A small on-disk mapping cache (`[WindowSignature: CaptureDestination]`) backs the "remembered" behavior in step 5.
+
+**Open questions:**
+- Fallback name when neither signal resolves (full-screen capture spanning multiple apps, or an app with an unhelpful bundle name) — likely an "Unsorted" folder rather than skipping the chip entirely.
+- Whether the folder-chip mapping cache should be editable/visible in Settings (a simple list of "Figma → Design System" rules the user can rename or delete).
 
 ---
 
@@ -246,6 +301,8 @@ All three are independent. Snipsnap asks for mic and system audio permissions on
 | NSStatusItem | Menu bar |
 | NSPanel | Overlay windows (region selector, command bar, toast, annotation) |
 | UserDefaults | Hotkey preferences, settings |
+| Vision (on-device) | OCR text extraction for Auto-Organize subfolder suggestions (and future scrolling-capture OCR) |
+| Accessibility / NSWorkspace | Frontmost app bundle ID + window title at capture time — primary Auto-Organize signal |
 
 ---
 
@@ -270,7 +327,9 @@ Snipsnap/
 │   — TO BUILD —
 ├── AudioRingBuffer.swift         # AVAudioEngine tap → circular buffer in RAM
 ├── ClipEngine.swift              # Flush buffer → M4A on "clip that"
-└── CommandBar.swift              # Future: Spotlight-style text command panel
+├── CommandBar.swift              # Future: Spotlight-style text command panel
+├── CaptureClassifier.swift       # MVP: app/window metadata + Vision OCR → CaptureDestination suggestion
+└── AutoOrganizer.swift           # MVP: folder chip, create-on-demand nesting, mapping cache
 ```
 
 **Info.plist — required keys:**
@@ -342,7 +401,17 @@ No onboarding exists yet. First launch silently falls back to Desktop for save l
 - [ ] Don't proceed to the next step until the prior permission is granted (poll + retry)
 - [ ] Save folder step: show a picker with a suggested default (~/Desktop or ~/Screenshots), let user change it, persist to `AppSettings`
 
+### v0.9 — Dynamic Save Location (Auto-Organize)
+**MVP flagship feature #2**, alongside the screenshot loop — see full spec above. Not started.
+- [ ] `CaptureClassifier.swift` — read frontmost app bundle ID + window title at capture time
+- [ ] Vision OCR pass on the captured image for subfolder signal (page/section names, headings)
+- [ ] `AutoOrganizer.swift` — folder chip on toast, create-on-demand nesting under the user's root save folder
+- [ ] Mapping cache so confirmed product → folder choices are remembered without re-running OCR
+- [ ] Fallback "Unsorted" folder when neither signal resolves
+- [ ] Decide whether the mapping cache is user-editable in Settings
+
 ### v1.0 — Launch
+**MVP gate is the screenshot loop plus Auto-Organize** (capture → annotate → share as "look at this" / "here's why", landing in a self-sorting folder). Recording, camera bubble, and background tools are already built and keep shipping, but none of them block launch.
 - [ ] Full screen + window screenshot modes wired up as **global hotkeys** (⌘⇧1, ⌘⇧3) — the capture logic itself is done (`CaptureBar` modes work today via ⌘6 → click); only the dedicated hotkey binding is missing
 - [ ] App icon (`snipsnap-icon.svg` exists at repo root, not yet wired into `Assets.xcassets/AppIcon.appiconset`, which is still empty of icon files)
 - [ ] Notarization

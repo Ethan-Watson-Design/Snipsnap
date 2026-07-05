@@ -180,19 +180,19 @@ final class ShipItPanelView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func layoutOverlay(in bounds: NSRect) {
+    func layoutOverlay(in containerBounds: NSRect) {
         guard isPresented else {
             isHidden = true
             return
         }
         isHidden = false
         frame = NSRect(
-            x: bounds.width - Self.panelWidth,
+            x: containerBounds.width - Self.panelWidth,
             y: 0,
             width: Self.panelWidth,
-            height: bounds.height
+            height: containerBounds.height
         )
-        contentPanel.frame = bounds
+        contentPanel.frame = NSRect(origin: .zero, size: frame.size)
     }
 
     func dismiss() {
@@ -218,6 +218,7 @@ final class ShipItPanelView: NSView {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.autohidesScrollers = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentPanel.addSubview(scrollView)
 
         stackView.orientation = .vertical
@@ -280,6 +281,7 @@ final class ShipItPanelView: NSView {
         let label = NSTextField(labelWithString: text)
         label.font = NSFont.snipsnap(.caption)
         label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }
 

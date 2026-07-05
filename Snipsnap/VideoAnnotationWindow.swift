@@ -7,152 +7,264 @@
 
 import AppKit
 import AVFoundation
-import AVKit
 
-// MARK: - Duration Toast (anchored to selected annotation)
+// MARK: - Appearance-aware host
 
-final class AnnotationDurationToastView: NSView {
+private final class AppearanceAwareView: NSView {
+    var onEffectiveAppearanceChanged: (() -> Void)?
 
-    var onStartTimeChanged: ((Double) -> Void)?
-    var onDurationChanged: ((Double?) -> Void)?
-
-    private let startLabel = NSTextField(labelWithString: "Beginning")
-    private let startSlider = NSSlider()
-    private let endLabel = NSTextField(labelWithString: "Forever")
-    private let endSlider = NSSlider()
-    private var recordingDuration: Double = 60
-
-    private static let toastWidth: CGFloat = 168
-    private static let toastHeight: CGFloat = 80
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        build()
-    }
-
-    required init?(coder: NSCoder) { fatalError() }
-
-    private func build() {
-        wantsLayer = true
-        layer?.cornerRadius = 10
-        layer?.masksToBounds = false
-        layer?.shadowColor = NSColor.black.cgColor
-        layer?.shadowOpacity = 0.18
-        layer?.shadowRadius = 8
-        layer?.shadowOffset = CGSize(width: 0, height: -2)
-
-        let vfx = NSVisualEffectView(frame: bounds)
-        vfx.autoresizingMask = [.width, .height]
-        vfx.material = .popover
-        vfx.blendingMode = .withinWindow
-        vfx.state = .active
-        vfx.wantsLayer = true
-        vfx.layer?.cornerRadius = 10
-        vfx.layer?.masksToBounds = true
-        addSubview(vfx)
-
-        let labelWidth = Self.toastWidth - 20
-
-        startLabel.frame = CGRect(x: 10, y: 56, width: labelWidth, height: 16)
-        startLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        startLabel.textColor = .labelColor
-        startLabel.alignment = .center
-        addSubview(startLabel)
-
-        startSlider.frame = CGRect(x: 10, y: 38, width: labelWidth, height: 16)
-        startSlider.minValue = 1
-        startSlider.maxValue = 61
-        startSlider.doubleValue = startSlider.minValue
-        startSlider.sliderType = .linear
-        startSlider.isContinuous = true
-        startSlider.target = self
-        startSlider.action = #selector(startSliderMoved(_:))
-        addSubview(startSlider)
-
-        endLabel.frame = CGRect(x: 10, y: 28, width: labelWidth, height: 16)
-        endLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        endLabel.textColor = .labelColor
-        endLabel.alignment = .center
-        addSubview(endLabel)
-
-        endSlider.frame = CGRect(x: 10, y: 10, width: labelWidth, height: 16)
-        endSlider.minValue = 1
-        endSlider.maxValue = 61
-        endSlider.doubleValue = endSlider.maxValue
-        endSlider.sliderType = .linear
-        endSlider.isContinuous = true
-        endSlider.target = self
-        endSlider.action = #selector(endSliderMoved(_:))
-        addSubview(endSlider)
-    }
-
-    func configure(recordingDuration: Double, startTime: Double, visibleDuration: Double?) {
-        self.recordingDuration = max(1, floor(recordingDuration))
-        let maxVal = Self.sliderMax(for: self.recordingDuration)
-        for slider in [startSlider, endSlider] {
-            slider.maxValue = maxVal
-            slider.minValue = 1
-        }
-        startSlider.doubleValue = Self.startSliderValue(for: startTime, recordingDuration: self.recordingDuration)
-        endSlider.doubleValue = Self.endSliderValue(for: visibleDuration, recordingDuration: self.recordingDuration)
-        updateLabels()
-    }
-
-    @objc private func startSliderMoved(_ sender: NSSlider) {
-        let start = Self.startTime(fromSlider: sender.doubleValue, recordingDuration: recordingDuration)
-        updateLabels()
-        onStartTimeChanged?(start)
-    }
-
-    @objc private func endSliderMoved(_ sender: NSSlider) {
-        let duration = Self.duration(fromEndSlider: sender.doubleValue, recordingDuration: recordingDuration)
-        updateLabels()
-        onDurationChanged?(duration)
-    }
-
-    private func updateLabels() {
-        let start = Self.startTime(fromSlider: startSlider.doubleValue, recordingDuration: recordingDuration)
-        startLabel.stringValue = start <= 0.5 ? "Beginning" : "\(Int(start.rounded()))s"
-
-        if let seconds = Self.duration(fromEndSlider: endSlider.doubleValue, recordingDuration: recordingDuration) {
-            endLabel.stringValue = "\(Int(seconds.rounded()))s"
-        } else {
-            endLabel.stringValue = "Forever"
-        }
-    }
-
-    private static func sliderMax(for recordingDuration: Double) -> Double {
-        max(2, floor(recordingDuration) + 1)
-    }
-
-    /// Min slider position = beginning of video; higher values map 1s … recording length.
-    private static func startTime(fromSlider value: Double, recordingDuration: Double) -> Double {
-        if value <= 1.5 { return 0 }
-        return max(1, min(value.rounded() - 1, floor(recordingDuration)))
-    }
-
-    private static func startSliderValue(for startTime: Double, recordingDuration: Double) -> Double {
-        if startTime <= 0.5 { return 1 }
-        return min(max(2, startTime.rounded() + 1), sliderMax(for: recordingDuration))
-    }
-
-    /// Max slider position = forever; lower values map 1s … recording length.
-    private static func duration(fromEndSlider value: Double, recordingDuration: Double) -> Double? {
-        let maxVal = sliderMax(for: recordingDuration)
-        if value >= maxVal - 0.5 { return nil }
-        return max(1, min(value.rounded(), floor(recordingDuration)))
-    }
-
-    private static func endSliderValue(for duration: Double?, recordingDuration: Double) -> Double {
-        let maxVal = sliderMax(for: recordingDuration)
-        guard let duration else { return maxVal }
-        return min(max(1, duration.rounded()), floor(recordingDuration))
-    }
-
-    static func preferredSize() -> NSSize {
-        NSSize(width: toastWidth, height: toastHeight)
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onEffectiveAppearanceChanged?()
     }
 }
+
+// MARK: - Timeline
+
+final class VideoTimelineView: NSView {
+
+    var videoDuration: Double = 0 {
+        didSet { needsDisplay = true }
+    }
+    var currentTime: Double = 0 {
+        didSet { needsDisplay = true }
+    }
+
+    var selectionStartTime: Double?
+    var selectionVisibleDuration: Double?
+
+    var onSeek: ((Double) -> Void)?
+    var onScrubBegan: (() -> Void)?
+    var onScrubEnded: (() -> Void)?
+    var onSelectionStartChanged: ((Double) -> Void)?
+    var onSelectionDurationChanged: ((Double?) -> Void)?
+
+    private enum DragMode {
+        case none
+        case scrub
+        case moveSelection
+        case resizeStart
+        case resizeEnd
+    }
+
+    private var dragMode: DragMode = .none
+    private var dragAnchorTime: Double = 0
+    private var dragAnchorEndTime: Double = 0
+    private var dragStartMouseTime: Double = 0
+
+    private let trackHeight: CGFloat = 8
+    private let handleWidth: CGFloat = 6
+    private let minDuration: Double = 1
+
+    override var acceptsFirstResponder: Bool { true }
+
+    private var hasSelection: Bool { selectionStartTime != nil }
+
+    private var selectionEndTime: Double {
+        guard let start = selectionStartTime else { return 0 }
+        if let duration = selectionVisibleDuration {
+            return min(videoDuration, start + duration)
+        }
+        return videoDuration
+    }
+
+    private func trackRect(in bounds: CGRect) -> CGRect {
+        CGRect(
+            x: 0,
+            y: (bounds.height - trackHeight) / 2,
+            width: bounds.width,
+            height: trackHeight
+        )
+    }
+
+    private func xForTime(_ time: Double, in track: CGRect) -> CGFloat {
+        guard videoDuration > 0 else { return track.minX }
+        return track.minX + CGFloat(time / videoDuration) * track.width
+    }
+
+    private func timeForX(_ x: CGFloat, in track: CGRect) -> Double {
+        guard track.width > 0, videoDuration > 0 else { return 0 }
+        let fraction = max(0, min(1, (x - track.minX) / track.width))
+        return fraction * videoDuration
+    }
+
+    private func selectionRect(in track: CGRect) -> CGRect? {
+        guard let start = selectionStartTime, videoDuration > 0 else { return nil }
+        let end = selectionEndTime
+        let x1 = xForTime(start, in: track)
+        let x2 = xForTime(end, in: track)
+        return CGRect(x: x1, y: track.minY - 4, width: max(x2 - x1, handleWidth * 2), height: track.height + 8)
+    }
+
+    private func hitTestSelection(at point: CGPoint) -> DragMode {
+        guard let rect = selectionRect(in: trackRect(in: bounds)), rect.contains(point) else { return .none }
+
+        let leftHandle = CGRect(x: rect.minX, y: rect.minY, width: handleWidth, height: rect.height)
+        let rightHandle = CGRect(x: rect.maxX - handleWidth, y: rect.minY, width: handleWidth, height: rect.height)
+        let minMoveWidth = handleWidth * 3
+
+        if rect.width >= minMoveWidth {
+            if leftHandle.contains(point) { return .resizeStart }
+            if rightHandle.contains(point) { return .resizeEnd }
+            return .moveSelection
+        }
+
+        let fraction = (point.x - rect.minX) / rect.width
+        if fraction <= 0.25 { return .resizeStart }
+        if fraction >= 0.75 { return .resizeEnd }
+        return .moveSelection
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let track = trackRect(in: bounds)
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+
+        // Track background
+        let trackPath = CGPath(roundedRect: track, cornerWidth: 4, cornerHeight: 4, transform: nil)
+        ctx.setFillColor(NSColor.quaternaryLabelColor.cgColor)
+        ctx.addPath(trackPath)
+        ctx.fillPath()
+
+        // Selected annotation range
+        if let rect = selectionRect(in: track) {
+            let rangePath = CGPath(roundedRect: rect, cornerWidth: 4, cornerHeight: 4, transform: nil)
+            ctx.setFillColor(NSColor.annotationSelectionAccent.withAlphaComponent(0.35).cgColor)
+            ctx.addPath(rangePath)
+            ctx.fillPath()
+            ctx.setStrokeColor(NSColor.annotationSelectionAccent.cgColor)
+            ctx.setLineWidth(1.5)
+            ctx.addPath(rangePath)
+            ctx.strokePath()
+
+            let handleH = rect.height
+            for x in [rect.minX, rect.maxX - handleWidth] {
+                let handleRect = CGRect(x: x, y: rect.minY, width: handleWidth, height: handleH)
+                let handlePath = CGPath(roundedRect: handleRect, cornerWidth: 2, cornerHeight: 2, transform: nil)
+                ctx.setFillColor(NSColor.white.cgColor)
+                ctx.addPath(handlePath)
+                ctx.fillPath()
+                ctx.setStrokeColor(NSColor.annotationSelectionAccent.cgColor)
+                ctx.setLineWidth(1)
+                ctx.addPath(handlePath)
+                ctx.strokePath()
+            }
+        }
+
+        // Playhead
+        guard videoDuration > 0 else { return }
+        let playheadX = xForTime(currentTime, in: track)
+        ctx.setStrokeColor(NSColor.labelColor.cgColor)
+        ctx.setLineWidth(2)
+        ctx.move(to: CGPoint(x: playheadX, y: track.minY - 6))
+        ctx.addLine(to: CGPoint(x: playheadX, y: track.maxY + 6))
+        ctx.strokePath()
+
+        let dotRect = CGRect(x: playheadX - 4, y: track.maxY + 4, width: 8, height: 8)
+        ctx.setFillColor(NSColor.labelColor.cgColor)
+        ctx.fillEllipse(in: dotRect)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let track = trackRect(in: bounds)
+
+        if hasSelection {
+            let hit = hitTestSelection(at: point)
+            if hit != .none {
+                dragMode = hit
+                dragAnchorTime = selectionStartTime ?? 0
+                dragAnchorEndTime = selectionEndTime
+                dragStartMouseTime = timeForX(point.x, in: track)
+                return
+            }
+        }
+
+        if track.insetBy(dx: 0, dy: -10).contains(point) {
+            dragMode = .scrub
+            onScrubBegan?()
+            let time = timeForX(point.x, in: track)
+            currentTime = time
+            needsDisplay = true
+            onSeek?(time)
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        let track = trackRect(in: bounds)
+        guard videoDuration > 0 else { return }
+
+        switch dragMode {
+        case .scrub:
+            let time = timeForX(point.x, in: track)
+            currentTime = time
+            needsDisplay = true
+            onSeek?(time)
+
+        case .moveSelection:
+            let mouseTime = timeForX(point.x, in: track)
+            let delta = mouseTime - dragStartMouseTime
+            if selectionVisibleDuration == nil {
+                let newStart = max(0, min(dragAnchorTime + delta, videoDuration - minDuration))
+                selectionStartTime = newStart
+                onSelectionStartChanged?(newStart)
+            } else {
+                let duration = dragAnchorEndTime - dragAnchorTime
+                let maxStart = max(0, videoDuration - duration)
+                let newStart = max(0, min(dragAnchorTime + delta, maxStart))
+                selectionStartTime = newStart
+                onSelectionStartChanged?(newStart)
+            }
+            needsDisplay = true
+
+        case .resizeStart:
+            let newStart = max(0, min(timeForX(point.x, in: track), dragAnchorEndTime - minDuration))
+            let newDuration = dragAnchorEndTime - newStart
+            selectionStartTime = newStart
+            selectionVisibleDuration = newDuration
+            onSelectionStartChanged?(newStart)
+            onSelectionDurationChanged?(newDuration)
+            needsDisplay = true
+
+        case .resizeEnd:
+            let newEnd = max((selectionStartTime ?? 0) + minDuration, min(timeForX(point.x, in: track), videoDuration))
+            let start = selectionStartTime ?? 0
+            if newEnd >= videoDuration - 0.25 {
+                selectionVisibleDuration = nil
+                onSelectionDurationChanged?(nil)
+            } else {
+                let newDuration = newEnd - start
+                selectionVisibleDuration = newDuration
+                onSelectionDurationChanged?(newDuration)
+            }
+            needsDisplay = true
+
+        case .none:
+            break
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if dragMode == .scrub {
+            onScrubEnded?()
+        }
+        dragMode = .none
+    }
+
+    func configureSelection(startTime: Double, visibleDuration: Double?) {
+        selectionStartTime = startTime
+        selectionVisibleDuration = visibleDuration
+        needsDisplay = true
+    }
+
+    func clearSelection() {
+        selectionStartTime = nil
+        selectionVisibleDuration = nil
+        needsDisplay = true
+    }
+}
+
+// MARK: - Window
 
 final class VideoAnnotationWindow: NSWindow {
 
@@ -160,24 +272,29 @@ final class VideoAnnotationWindow: NSWindow {
 
     private let player: AVPlayer
     private let videoURL: URL
+    private let playerView: ZoomablePlayerView
     private let canvas: AnnotationCanvasView
 
     private var pill: ToolbarPillView!
     private var playPauseButton: NSButton!
-    private var scrubber: NSSlider!
+    private var timeline: VideoTimelineView!
     private var timeLabel: NSTextField!
-    private var durationToast: AnnotationDurationToastView!
     private var saveButton: NSButton!
     private var isSaving = false
     private var timeControlObservation: NSKeyValueObservation?
     private var timeObserverToken: Any?
     private var undoRedoKeyMonitor: Any?
     private var videoDuration: Double = 0
+    private var isScrubbing = false
+    private var contentContainer: NSView?
+    private var timelineBg: NSView?
+    private var rowSep: NSView?
 
     private let videoAreaHeight: CGFloat = 492
-    private let toolbarHeight: CGFloat = 64
-    private let toolbarHorizontalInset: CGFloat = 12
-    private let controlsRowHeight: CGFloat = 40
+    private let timelineRowHeight: CGFloat = 44
+    private let toolbarRowHeight: CGFloat = 40
+    private let toolbarBottomInset: CGFloat = 12
+    private let timelineHorizontalInset: CGFloat = 12
 
     // MARK: - Entry Point
 
@@ -194,28 +311,55 @@ final class VideoAnnotationWindow: NSWindow {
     private init(url: URL) {
         self.videoURL = url
         self.player = AVPlayer(url: url)
+        self.playerView = ZoomablePlayerView(player: self.player, frame: .zero)
         self.canvas = AnnotationCanvasView(frame: .zero)
 
-        let windowSize = NSSize(width: 900, height: videoAreaHeight + toolbarHeight)
+        let windowSize = NSSize(width: 900, height: videoAreaHeight + toolbarRowHeight + timelineRowHeight)
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        let origin = NSPoint(
-            x: screen.midX - windowSize.width / 2,
-            y: screen.midY - windowSize.height / 2
+        let styleMask: NSWindow.StyleMask = [.titled, .closable]
+        let frameRect = NSWindow.frameRect(
+            forContentRect: NSRect(origin: .zero, size: windowSize),
+            styleMask: styleMask
         )
+        let centeredFrame = NSRect(
+            x: screen.midX - frameRect.width / 2,
+            y: screen.midY - frameRect.height / 2,
+            width: frameRect.width,
+            height: frameRect.height
+        )
+        let contentRect = NSWindow.contentRect(forFrameRect: centeredFrame, styleMask: styleMask)
 
         super.init(
-            contentRect: NSRect(origin: origin, size: windowSize),
-            styleMask: [.titled, .closable, .miniaturizable],
+            contentRect: contentRect,
+            styleMask: styleMask,
             backing: .buffered,
             defer: false
         )
 
-        title = "Recording"
         isReleasedWhenClosed = false
+
+        AnnotationTitlebarStyle.apply(
+            to: self,
+            title: url.deletingPathExtension().lastPathComponent,
+            backgroundColor: .windowBackgroundColor,
+            laysContentBelowTitlebar: true,
+            usesSystemAppearance: true
+        )
 
         buildLayout(windowSize: windowSize)
         wire()
         player.play()
+    }
+
+    override func setFrame(_ frameRect: NSRect, display displayFlag: Bool) {
+        super.setFrame(frameRect, display: displayFlag)
+        if let contentContainer {
+            AnnotationTitlebarStyle.layoutContentContainer(
+                contentContainer,
+                in: self,
+                laysContentBelowTitlebar: true
+            )
+        }
     }
 
     // MARK: - Layout
@@ -223,87 +367,62 @@ final class VideoAnnotationWindow: NSWindow {
     private func buildLayout(windowSize: NSSize) {
         pill = ToolbarPillView(
             frame: CGRect(x: 0, y: 0, width: 100, height: 40),
-            showsCopyButton: false
+            showsCopyButton: false,
+            availableTools: AnnotationTool.videoTools
         )
+
+        let shell = AppearanceAwareView(frame: NSRect(origin: .zero, size: windowSize))
+        shell.wantsLayer = true
+        shell.layer?.backgroundColor = NSColor.black.cgColor
+        shell.autoresizingMask = [.width, .height]
+        shell.onEffectiveAppearanceChanged = { [weak self] in
+            self?.updateTimelineChromeAppearance()
+        }
 
         let root = NSView(frame: NSRect(origin: .zero, size: windowSize))
 
-        let videoRect = NSRect(x: 0, y: toolbarHeight, width: windowSize.width, height: videoAreaHeight)
+        let videoRect = NSRect(
+            x: 0,
+            y: timelineRowHeight,
+            width: windowSize.width,
+            height: videoAreaHeight + toolbarRowHeight
+        )
 
-        // Video player — no overlay controls so the annotation canvas owns the full surface
-        let playerView = AVPlayerView(frame: videoRect)
-        playerView.player = player
-        playerView.controlsStyle = .none
-        playerView.wantsLayer = true
-        playerView.layer?.backgroundColor = NSColor.black.cgColor
+        playerView.frame = videoRect
         root.addSubview(playerView)
 
-        // Annotation canvas — transparent overlay, same frame, added after player (higher z-order)
         canvas.frame = videoRect
         root.addSubview(canvas)
 
-        // Separator
-        let sep = NSView(frame: NSRect(x: 0, y: toolbarHeight - 1, width: windowSize.width, height: 1))
-        sep.wantsLayer = true
-        sep.layer?.backgroundColor = NSColor.separatorColor.cgColor
-        root.addSubview(sep)
+        let timelineBg = NSView(frame: NSRect(x: 0, y: 0, width: windowSize.width, height: timelineRowHeight))
+        timelineBg.wantsLayer = true
+        root.addSubview(timelineBg)
+        self.timelineBg = timelineBg
 
-        // Toolbar background
-        let tbBg = NSView(frame: NSRect(x: 0, y: 0, width: windowSize.width, height: toolbarHeight))
-        tbBg.wantsLayer = true
-        tbBg.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-        root.addSubview(tbBg)
-
-        let rowSep = NSView(frame: NSRect(x: 0, y: controlsRowHeight, width: windowSize.width, height: 1))
+        let rowSep = NSView(frame: NSRect(x: 0, y: timelineRowHeight, width: windowSize.width, height: 1))
         rowSep.wantsLayer = true
-        rowSep.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
         root.addSubview(rowSep)
+        self.rowSep = rowSep
 
-        // ── Scrubber row ────────────────────────────────────────────────────
-        let scrubRowY = controlsRowHeight
-        let timeLabelWidth: CGFloat = 98
-
-        let scrub = NSSlider(value: 0, minValue: 0, maxValue: 1, target: self, action: #selector(scrubberMoved(_:)))
-        scrub.frame = CGRect(
-            x: toolbarHorizontalInset,
-            y: scrubRowY + 4,
-            width: windowSize.width - timeLabelWidth - toolbarHorizontalInset * 2,
-            height: 16
+        pill.frame.origin = ToolbarPillView.defaultOrigin(
+            pillSize: pill.frame.size,
+            in: videoRect.size,
+            bottomInset: toolbarBottomInset
         )
-        scrub.sliderType = .linear
-        scrub.isContinuous = true
-        scrub.autoresizingMask = [.width]
-        root.addSubview(scrub)
-        self.scrubber = scrub
-
-        let tLabel = NSTextField(labelWithString: "0:00 / 0:00")
-        tLabel.frame = CGRect(
-            x: windowSize.width - timeLabelWidth - toolbarHorizontalInset,
-            y: scrubRowY + 3,
-            width: timeLabelWidth,
-            height: 18
-        )
-        tLabel.alignment = .right
-        tLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        tLabel.textColor = .secondaryLabelColor
-        tLabel.autoresizingMask = [.minXMargin]
-        root.addSubview(tLabel)
-        self.timeLabel = tLabel
-
-        // Duration toast — floats over the video near the selected annotation
-        let toast = AnnotationDurationToastView(frame: .zero)
-        toast.isHidden = true
-        root.addSubview(toast)
-        self.durationToast = toast
-
-        // ── Controls row ────────────────────────────────────────────────────
-        let controlsMidY = controlsRowHeight / 2
+        pill.frame.origin.y += timelineRowHeight
+        pill.dragBounds = videoRect
+        root.addSubview(pill)
+        let timelineMidY = timelineRowHeight / 2
         let playButtonWidth: CGFloat = 32
+        let timeLabelWidth: CGFloat = 98
+        let saveButtonWidth: CGFloat = 206
+        let timelineX = timelineHorizontalInset + playButtonWidth + 8
+        let trailingInset = timelineHorizontalInset + saveButtonWidth + 8
+        let timelineWidth = windowSize.width - timelineX - timeLabelWidth - 8 - trailingInset
 
-        // Play / Pause button (left)
         let ppBtn = NSButton(frame: CGRect(
-            x: toolbarHorizontalInset,
-            y: controlsMidY - 16,
+            x: timelineHorizontalInset,
+            y: timelineMidY - 16,
             width: playButtonWidth,
             height: 32
         ))
@@ -316,11 +435,34 @@ final class VideoAnnotationWindow: NSWindow {
         self.playPauseButton = ppBtn
         updatePlayPauseButton(playing: false)
 
-        // Save and show in Finder (right)
+        let tl = VideoTimelineView(frame: CGRect(
+            x: timelineX,
+            y: (timelineRowHeight - 28) / 2,
+            width: timelineWidth,
+            height: 28
+        ))
+        tl.autoresizingMask = [.width]
+        root.addSubview(tl)
+        self.timeline = tl
+
+        let tLabel = NSTextField(labelWithString: "0:00 / 0:00")
+        tLabel.frame = CGRect(
+            x: windowSize.width - trailingInset - timeLabelWidth,
+            y: (timelineRowHeight - 18) / 2,
+            width: timeLabelWidth,
+            height: 18
+        )
+        tLabel.alignment = .right
+        tLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+        tLabel.textColor = .secondaryLabelColor
+        tLabel.autoresizingMask = [.minXMargin]
+        root.addSubview(tLabel)
+        self.timeLabel = tLabel
+
         let saveBtn = NSButton(frame: CGRect(
-            x: windowSize.width - 220 - toolbarHorizontalInset,
-            y: controlsMidY - 15,
-            width: 206,
+            x: windowSize.width - saveButtonWidth - timelineHorizontalInset,
+            y: (timelineRowHeight - 30) / 2,
+            width: saveButtonWidth,
             height: 30
         ))
         saveBtn.bezelStyle = .rounded
@@ -330,47 +472,82 @@ final class VideoAnnotationWindow: NSWindow {
         root.addSubview(saveBtn)
         self.saveButton = saveBtn
 
-        // Tool strip — flush after play button
-        let pillX = toolbarHorizontalInset + playButtonWidth + 8
-        pill.frame.origin = CGPoint(x: pillX, y: 0)
-        root.addSubview(pill)
+        shell.addSubview(root)
+        contentView = shell
+        contentContainer = root
 
-        contentView = root
+        AnnotationTitlebarStyle.layoutContentContainer(
+            root,
+            in: self,
+            laysContentBelowTitlebar: true
+        )
         makeFirstResponder(canvas)
+        updateTimelineChromeAppearance()
+    }
+
+    private func updateTimelineChromeAppearance() {
+        timelineBg?.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        rowSep?.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.5).cgColor
+        timeLabel?.textColor = .secondaryLabelColor
+        playPauseButton?.contentTintColor = .labelColor
+        updatePlayPauseButton(playing: player.timeControlStatus == .playing)
+        timeline?.needsDisplay = true
     }
 
     // MARK: - Wire
 
     private func wire() {
         canvas.videoMode = true
-        pill.selectedTool = .marker
-        pill.selectedColorIndex = 0
+        canvas.allowedTools = Set(AnnotationTool.videoTools)
+        canvas.selectedTool = .zoom
+        pill.selectedTool = .zoom
+        pill.selectedColor = NSColor.annotationPalette[0]
+
+        playerView.zoomAnnotationsProvider = { [weak self] in
+            self?.canvas.annotations ?? []
+        }
+        playerView.canvasSize = canvas.bounds.size
 
         canvas.onSelectionChanged = { [weak self] index in
-            self?.updateDurationToast(for: index)
+            self?.updateTimelineSelection(for: index)
         }
 
-        canvas.onSelectionGeometryChanged = { [weak self] in
-            self?.positionDurationToast()
+        timeline.onSeek = { [weak self] time in
+            self?.seekTo(time)
         }
 
-        durationToast.onStartTimeChanged = { [weak self] startTime in
+        timeline.onScrubBegan = { [weak self] in
+            guard let self else { return }
+            self.isScrubbing = true
+            self.canvas.isScrubbing = true
+            self.playerView.isScrubbing = true
+            self.playerView.setContinuousUpdatesEnabled(true)
+        }
+
+        timeline.onScrubEnded = { [weak self] in
+            guard let self else { return }
+            self.isScrubbing = false
+            self.canvas.isScrubbing = false
+            self.playerView.isScrubbing = false
+            self.playerView.setContinuousUpdatesEnabled(self.player.timeControlStatus == .playing)
+            self.playerView.updateZoomPreview()
+            self.canvas.needsDisplay = true
+        }
+
+        timeline.onSelectionStartChanged = { [weak self] startTime in
             guard let self, let index = canvas.selectedIndex else { return }
             canvas.setStartTime(for: index, seconds: startTime, recordingDuration: videoDuration)
-            self.updateDurationToast(for: index)
         }
 
-        durationToast.onDurationChanged = { [weak self] duration in
+        timeline.onSelectionDurationChanged = { [weak self] duration in
             guard let self, let index = canvas.selectedIndex else { return }
             if let duration {
                 canvas.setVisibleDuration(for: index, seconds: duration, recordingDuration: videoDuration)
             } else {
                 canvas.setForever(for: index, forever: true)
             }
-            self.updateDurationToast(for: index)
         }
 
-        // Auto-pause when the user starts a stroke
         canvas.onWillDraw = { [weak self] in
             guard let self, self.player.timeControlStatus == .playing else { return }
             self.player.pause()
@@ -378,7 +555,6 @@ final class VideoAnnotationWindow: NSWindow {
 
         canvas.onToolChanged = { [weak self] tool in
             self?.pill.selectedTool = tool
-            self?.updateDurationToast(for: self?.canvas.selectedIndex)
         }
 
         canvas.onEscapeAction = { [weak self] in
@@ -389,15 +565,19 @@ final class VideoAnnotationWindow: NSWindow {
             guard let self else { return }
             canvas.selectedTool = tool
             pill.selectedTool = tool
-            updateDurationToast(for: canvas.selectedIndex)
         }
 
-        pill.onColorSelected = { [weak self] idx in
+        pill.onColorSelected = { [weak self] color in
             guard let self else { return }
-            let color = NSColor.annotationPalette[idx]
             canvas.selectedColor = color
-            pill.selectedColorIndex = idx
+            pill.selectedColor = color
             canvas.updateEmojiPickerColor(color)
+        }
+
+        pill.onStrokeToolSelected = { [weak self] style in
+            guard let self else { return }
+            canvas.selectedStrokeTool = style
+            pill.selectedStrokeTool = style
         }
 
         pill.onArrowTipStyleSelected = { [weak self] style in
@@ -406,28 +586,26 @@ final class VideoAnnotationWindow: NSWindow {
             pill.selectedArrowTipStyle = style
         }
 
-        // Keep play/pause button icon in sync with actual player state
+        pill.onArrowPathStyleSelected = { [weak self] style in
+            guard let self else { return }
+            canvas.selectedArrowPathStyle = style
+            pill.selectedArrowPathStyle = style
+        }
+
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
             DispatchQueue.main.async {
-                self?.updatePlayPauseButton(playing: player.timeControlStatus == .playing)
+                guard let self else { return }
+                let playing = player.timeControlStatus == .playing
+                self.updatePlayPauseButton(playing: playing)
+                self.canvas.isPlaybackActive = playing
+                self.playerView.isPlaybackActive = playing
+                self.playerView.setContinuousUpdatesEnabled(playing || self.isScrubbing)
+                self.playerView.updateZoomPreview()
+                self.canvas.needsDisplay = true
             }
         }
 
-        // Drive scrubber + time label from playback position
-        let interval = CMTime(value: 1, timescale: 10)
-        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let current = CMTimeGetSeconds(time)
-                let total = CMTimeGetSeconds(self.player.currentItem?.duration ?? .zero)
-                guard total.isFinite, total > 0 else { return }
-                self.videoDuration = total
-                self.canvas.playbackTime = current
-                self.canvas.needsDisplay = true
-                self.scrubber.doubleValue = current / total
-                self.timeLabel.stringValue = "\(Self.formatTime(current)) / \(Self.formatTime(total))"
-            }
-        }
+        installPlaybackTimeObserver()
 
         Task { [weak self] in
             guard let self, let asset = self.player.currentItem?.asset else { return }
@@ -436,6 +614,7 @@ final class VideoAnnotationWindow: NSWindow {
             await MainActor.run {
                 guard total.isFinite, total > 0 else { return }
                 self.videoDuration = total
+                self.timeline.videoDuration = total
             }
         }
 
@@ -451,6 +630,22 @@ final class VideoAnnotationWindow: NSWindow {
 
     // MARK: - Playback
 
+    private func installPlaybackTimeObserver() {
+        guard timeObserverToken == nil else { return }
+        let interval = CMTime(value: 1, timescale: 10)
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            MainActor.assumeIsolated {
+                guard let self, !self.isScrubbing else { return }
+                let current = CMTimeGetSeconds(time)
+                let total = CMTimeGetSeconds(self.player.currentItem?.duration ?? .zero)
+                guard total.isFinite, total > 0 else { return }
+                self.videoDuration = total
+                self.timeline.videoDuration = total
+                self.updatePlaybackTime(current, total: total)
+            }
+        }
+    }
+
     @objc private func togglePlayPause() {
         if player.timeControlStatus == .playing {
             player.pause()
@@ -459,64 +654,39 @@ final class VideoAnnotationWindow: NSWindow {
         }
     }
 
-    @objc private func scrubberMoved(_ sender: NSSlider) {
+    private func seekTo(_ seconds: Double) {
         guard let item = player.currentItem else { return }
         let total = CMTimeGetSeconds(item.duration)
         guard total.isFinite, total > 0 else { return }
-        let target = CMTimeMakeWithSeconds(sender.doubleValue * total, preferredTimescale: 600)
+        let clamped = max(0, min(seconds, total))
+        let target = CMTimeMakeWithSeconds(clamped, preferredTimescale: 600)
         player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
-        canvas.playbackTime = CMTimeGetSeconds(target)
+        updatePlaybackTime(clamped, total: total)
+    }
+
+    private func updatePlaybackTime(_ current: Double, total: Double) {
+        canvas.playbackTime = current
+        playerView.playbackTime = current
+        playerView.canvasSize = canvas.bounds.size
+        playerView.updateZoomPreview()
         canvas.needsDisplay = true
+        timeline.currentTime = current
+        timeLabel.stringValue = "\(Self.formatTime(current)) / \(Self.formatTime(total))"
     }
 
-    // MARK: - Annotation Duration
+    // MARK: - Timeline Selection
 
-    private func updateDurationToast(for index: Int?) {
-        let show = index != nil && canvas.selectedTool == .select
-        durationToast.isHidden = !show
-
-        guard show, let index, canvas.annotations.indices.contains(index) else { return }
+    private func updateTimelineSelection(for index: Int?) {
+        guard let index, canvas.annotations.indices.contains(index) else {
+            timeline.clearSelection()
+            return
+        }
         let placed = canvas.annotations[index]
-        durationToast.configure(
-            recordingDuration: videoDuration,
-            startTime: placed.startTime,
-            visibleDuration: placed.visibleDuration
-        )
-        positionDurationToast()
-    }
-
-    private func positionDurationToast() {
-        guard !durationToast.isHidden,
-              let box = canvas.selectionBoundingBox(),
-              let root = contentView else { return }
-
-        let toastSize = AnnotationDurationToastView.preferredSize()
-        let anchor = canvas.convert(box, to: root)
-        let gap: CGFloat = 8
-        let videoTop = toolbarHeight + videoAreaHeight
-        let videoBottom = toolbarHeight
-
-        let aboveY = anchor.maxY + gap
-        let belowY = anchor.minY - gap - toastSize.height
-        let placeAbove = aboveY + toastSize.height <= videoTop
-
-        var originX = anchor.midX - toastSize.width / 2
-        originX = max(8, min(originX, root.bounds.width - toastSize.width - 8))
-
-        let originY = placeAbove ? aboveY : belowY
-        let clampedY = max(videoBottom + 8, min(originY, videoTop - toastSize.height - 8))
-
-        durationToast.frame = CGRect(
-            x: originX,
-            y: clampedY,
-            width: toastSize.width,
-            height: toastSize.height
-        )
+        timeline.configureSelection(startTime: placed.startTime, visibleDuration: placed.visibleDuration)
     }
 
     @objc private func playerItemDidEnd() {
-        player.seek(to: .zero)
-        scrubber.doubleValue = 0
+        seekTo(0)
     }
 
     private static func formatTime(_ seconds: Double) -> String {
@@ -529,6 +699,7 @@ final class VideoAnnotationWindow: NSWindow {
             player.removeTimeObserver(token)
             timeObserverToken = nil
         }
+        playerView.setContinuousUpdatesEnabled(false)
         if let undoRedoKeyMonitor {
             NSEvent.removeMonitor(undoRedoKeyMonitor)
             self.undoRedoKeyMonitor = nil
@@ -539,6 +710,7 @@ final class VideoAnnotationWindow: NSWindow {
     private func updatePlayPauseButton(playing: Bool) {
         let symbol = playing ? "pause.fill" : "play.fill"
         let cfg = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+            .applying(.init(hierarchicalColor: .labelColor))
         playPauseButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: playing ? "Pause" : "Play")?
             .withSymbolConfiguration(cfg)
     }
@@ -547,16 +719,30 @@ final class VideoAnnotationWindow: NSWindow {
 
     @objc private func saveAndShowInFinder() {
         guard !isSaving else { return }
-        player.pause()
         isSaving = true
         saveButton.isEnabled = false
         saveButton.title = "Saving…"
 
-        AnnotatedVideoExporter.export(sourceURL: videoURL, canvas: canvas) { [weak self] result in
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        if let token = timeObserverToken {
+            player.removeTimeObserver(token)
+            timeObserverToken = nil
+        }
+        playerView.setContinuousUpdatesEnabled(false)
+
+        let snapshot = canvas.makeExportSnapshot()
+        canvas.isExporting = true
+
+        AnnotatedVideoExporter.export(sourceURL: videoURL, snapshot: snapshot, renderer: canvas) { [weak self] result in
             guard let self else { return }
+            self.canvas.isExporting = false
             self.isSaving = false
             self.saveButton.isEnabled = true
             self.saveButton.title = "Save and show in Finder"
+            self.player.replaceCurrentItem(with: AVPlayerItem(url: self.videoURL))
+            self.installPlaybackTimeObserver()
+            self.playerView.setContinuousUpdatesEnabled(self.player.timeControlStatus == .playing)
 
             switch result {
             case .success(let url):

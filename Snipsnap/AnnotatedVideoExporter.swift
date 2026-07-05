@@ -37,42 +37,79 @@ enum AnnotatedVideoExporter {
             semaphore.signal()
         }
         semaphore.wait()
-        return try outcome!.get()
+        guard let outcome else {
+            throw ExportError.exportFailed("Export was interrupted.")
+        }
+        return try outcome.get()
     }
 
     static func export(
         sourceURL: URL,
-        canvas: AnnotationCanvasView,
+        snapshot: AnnotationExportSnapshot,
+        renderer: AnnotationCanvasView,
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
-        DispatchQueue.main.async {
-            let canvasSize = canvas.bounds.size
-            let hasAnnotations = !canvas.annotations.isEmpty
-
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let outputURL = try exportSynchronously(
-                        sourceURL: sourceURL,
-                        canvas: canvas,
-                        canvasSize: canvasSize,
-                        hasAnnotations: hasAnnotations
-                    )
-                    DispatchQueue.main.async { completion(.success(outputURL)) }
-                } catch {
-                    DispatchQueue.main.async { completion(.failure(error)) }
-                }
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let outputURL = try exportSynchronously(
+                    sourceURL: sourceURL,
+                    snapshot: snapshot,
+                    renderer: renderer
+                )
+                DispatchQueue.main.async { completion(.success(outputURL)) }
+            } catch {
+                DispatchQueue.main.async { completion(.failure(error)) }
             }
+        }
+    }
+
+    private static func needsCompositedExport(snapshot: AnnotationExportSnapshot) -> Bool {
+        for placed in snapshot.annotations {
+            if case .zoom = placed.content { continue }
+            return true
+        }
+        return snapshot.annotations.contains { if case .zoom = $0.content { return true }; return false }
+    }
+
+    private static func hasDrawnAnnotations(_ annotations: [PlacedAnnotation]) -> Bool {
+        annotations.contains { placed in
+            if case .zoom = placed.content { return false }
+            return true
         }
     }
 
     private static func exportSynchronously(
         sourceURL: URL,
-        canvas: AnnotationCanvasView,
-        canvasSize: CGSize,
-        hasAnnotations: Bool
+        snapshot: AnnotationExportSnapshot,
+        renderer: AnnotationCanvasView
     ) throws -> URL {
-        if !hasAnnotations {
+        if !needsCompositedExport(snapshot: snapshot) {
             return sourceURL
+        }
+
+        let outputDirectory = sourceURL.deletingLastPathComponent()
+        let annotatedStem = "\(sourceURL.deletingPathExtension().lastPathComponent) (annotated)"
+        let preferredFilename = "\(annotatedStem).mp4"
+        let finalURL = CaptureNaming.uniqueURL(in: outputDirectory, preferredFilename: preferredFilename)
+
+        try renderCompositedVideo(
+            sourceURL: sourceURL,
+            snapshot: snapshot,
+            renderer: renderer,
+            to: finalURL
+        )
+        return finalURL
+    }
+
+    private static func renderCompositedVideo(
+        sourceURL: URL,
+        snapshot: AnnotationExportSnapshot,
+        renderer: AnnotationCanvasView,
+        to finalURL: URL
+    ) throws {
+        let zoomAnnotations = snapshot.annotations.filter {
+            if case .zoom = $0.content { return true }
+            return false
         }
 
         let asset = AVURLAsset(url: sourceURL)
@@ -95,10 +132,6 @@ enum AnnotatedVideoExporter {
         let audioTracks = try runAsync { try await asset.loadTracks(withMediaType: .audio) }
         let hasAudio = !audioTracks.isEmpty
 
-        let outputDirectory = sourceURL.deletingLastPathComponent()
-        let annotatedStem = "\(sourceURL.deletingPathExtension().lastPathComponent) (annotated)"
-        let preferredFilename = "\(annotatedStem).mp4"
-        let finalURL = CaptureNaming.uniqueURL(in: outputDirectory, preferredFilename: preferredFilename)
         let tempVideoURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
             .appendingPathExtension("mp4")
@@ -112,18 +145,20 @@ enum AnnotatedVideoExporter {
             videoTrack: videoTrack,
             transform: transform,
             outputSize: outputSize,
-            canvas: canvas,
-            canvasSize: canvasSize,
+            snapshot: snapshot,
+            renderer: renderer,
+            zoomAnnotations: zoomAnnotations,
             to: tempVideoURL
         )
 
         if hasAudio {
             try muxAudio(from: sourceURL, videoURL: tempVideoURL, outputURL: finalURL, duration: duration)
         } else {
+            if FileManager.default.fileExists(atPath: finalURL.path) {
+                try FileManager.default.removeItem(at: finalURL)
+            }
             try FileManager.default.copyItem(at: tempVideoURL, to: finalURL)
         }
-
-        return finalURL
     }
 
     private static func renderAnnotatedVideo(
@@ -131,8 +166,9 @@ enum AnnotatedVideoExporter {
         videoTrack: AVAssetTrack,
         transform: CGAffineTransform,
         outputSize: CGSize,
-        canvas: AnnotationCanvasView,
-        canvasSize: CGSize,
+        snapshot: AnnotationExportSnapshot,
+        renderer: AnnotationCanvasView,
+        zoomAnnotations: [PlacedAnnotation],
         to outputURL: URL
     ) throws {
         let reader = try AVAssetReader(asset: asset)
@@ -176,52 +212,95 @@ enum AnnotatedVideoExporter {
         }
 
         let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
         var sessionStarted = false
+        let canvasSize = snapshot.canvasSize
+        let annotations = snapshot.annotations
+        let hasDrawn = hasDrawnAnnotations(annotations)
+        let outputRect = CGRect(origin: .zero, size: outputSize)
 
         while reader.status == .reading {
-            guard let sampleBuffer = readerOutput.copyNextSampleBuffer(),
-                  let sourceBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { break }
-
-            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            if !sessionStarted {
-                writer.startSession(atSourceTime: presentationTime)
-                sessionStarted = true
-            }
-
-            while !writerInput.isReadyForMoreMediaData {
-                Thread.sleep(forTimeInterval: 0.005)
-            }
-
-            var ciImage = CIImage(cvPixelBuffer: sourceBuffer)
-            if transform != .identity {
-                ciImage = ciImage.transformed(by: transform)
-                let extent = ciImage.extent
-                if extent.origin.x != 0 || extent.origin.y != 0 {
-                    ciImage = ciImage.transformed(by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y))
+            let processedFrame = autoreleasepool { () -> Bool in
+                guard let sampleBuffer = readerOutput.copyNextSampleBuffer(),
+                      let sourceBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                    return false
                 }
-            }
 
-            guard let cgImage = ciContext.createCGImage(ciImage, from: CGRect(origin: .zero, size: outputSize)) else {
-                continue
-            }
+                let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                if !sessionStarted {
+                    writer.startSession(atSourceTime: presentationTime)
+                    sessionStarted = true
+                }
 
-            let frame = NSImage(cgImage: cgImage, size: outputSize)
-            let time = CMTimeGetSeconds(presentationTime)
-            let composited: NSImage = DispatchQueue.main.sync {
-                canvas.flattenedImage(
-                    background: frame,
+                while !writerInput.isReadyForMoreMediaData {
+                    Thread.sleep(forTimeInterval: 0.005)
+                }
+
+                var ciImage = CIImage(cvPixelBuffer: sourceBuffer)
+                if transform != .identity {
+                    ciImage = ciImage.transformed(by: transform)
+                    let extent = ciImage.extent
+                    if extent.origin.x != 0 || extent.origin.y != 0 {
+                        ciImage = ciImage.transformed(
+                            by: CGAffineTransform(translationX: -extent.origin.x, y: -extent.origin.y)
+                        )
+                    }
+                }
+                ciImage = ciImage.cropped(to: outputRect)
+
+                let time = CMTimeGetSeconds(presentationTime)
+                let zoom = ZoomEffect.transform(
                     at: time,
+                    from: zoomAnnotations,
                     outputSize: outputSize,
-                    mapFromCanvasSize: canvasSize
+                    canvasSize: canvasSize
                 )
+                if abs(zoom.scale - 1) > 0.001 {
+                    ciImage = ZoomEffect.applyZoom(to: ciImage, zoom: zoom, outputSize: outputSize)
+                }
+
+                guard let pool = adaptor.pixelBufferPool else { return true }
+
+                if hasDrawn {
+                    guard let cgImage = ciContext.createCGImage(ciImage, from: outputRect) else { return true }
+
+                    let frame = NSImage(cgImage: cgImage, size: outputSize)
+                    let composited: NSImage
+                    if Thread.isMainThread {
+                        composited = renderer.flattenedImageForExport(
+                            background: frame,
+                            at: time,
+                            outputSize: outputSize,
+                            mapFromCanvasSize: canvasSize,
+                            annotations: annotations
+                        )
+                    } else {
+                        composited = DispatchQueue.main.sync {
+                            renderer.flattenedImageForExport(
+                                background: frame,
+                                at: time,
+                                outputSize: outputSize,
+                                mapFromCanvasSize: canvasSize,
+                                annotations: annotations
+                            )
+                        }
+                    }
+
+                    guard let pixelBuffer = makePixelBuffer(from: composited, size: outputSize, pool: pool) else {
+                        return true
+                    }
+                    adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+                } else {
+                    guard let pixelBuffer = makePixelBuffer(from: ciImage, size: outputSize, pool: pool, context: ciContext, colorSpace: colorSpace) else {
+                        return true
+                    }
+                    adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+                }
+
+                return true
             }
 
-            guard let pool = adaptor.pixelBufferPool,
-                  let pixelBuffer = makePixelBuffer(from: composited, size: outputSize, pool: pool) else {
-                continue
-            }
-
-            adaptor.append(pixelBuffer, withPresentationTime: presentationTime)
+            if !processedFrame { break }
         }
 
         writerInput.markAsFinished()
@@ -291,6 +370,26 @@ enum AnnotatedVideoExporter {
     }
 
     private static func makePixelBuffer(
+        from image: CIImage,
+        size: CGSize,
+        pool: CVPixelBufferPool,
+        context: CIContext,
+        colorSpace: CGColorSpace
+    ) -> CVPixelBuffer? {
+        var pixelBuffer: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBuffer) == kCVReturnSuccess,
+              let buffer = pixelBuffer else { return nil }
+
+        context.render(
+            image,
+            to: buffer,
+            bounds: CGRect(origin: .zero, size: size),
+            colorSpace: colorSpace
+        )
+        return buffer
+    }
+
+    private static func makePixelBuffer(
         from image: NSImage,
         size: CGSize,
         pool: CVPixelBufferPool
@@ -325,4 +424,5 @@ enum AnnotatedVideoExporter {
         context.draw(cgImage, in: CGRect(origin: .zero, size: size))
         return buffer
     }
+
 }

@@ -1759,6 +1759,10 @@ final class ToolHoverButton: NSButton {
     var tool: AnnotationTool?
     var onTooltipRequested: ((NSRect) -> Void)?
     var onTooltipDismissed: (() -> Void)?
+    /// When true, tooltips show immediately instead of after the initial delay.
+    var areTooltipsPrimed: (() -> Bool)?
+
+    private static let initialTooltipDelay: TimeInterval = 1.0
 
     private var hoverOverlay: CALayer?
     private var tooltipTimer: Timer?
@@ -1808,7 +1812,8 @@ final class ToolHoverButton: NSButton {
 
     private func scheduleTooltip() {
         tooltipTimer?.invalidate()
-        tooltipTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+        let delay = areTooltipsPrimed?() == true ? 0 : Self.initialTooltipDelay
+        tooltipTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self, self.isInsideBounds, let win = self.window else { return }
                 let winRect = self.convert(self.bounds, to: nil)
@@ -1844,6 +1849,7 @@ final class ToolbarPillView: NSView {
     private var toolButtons: [AnnotationTool: ToolHoverButton] = [:]
     private var colorButtons: [Int: CircleColorButton] = [:]
     private let tooltipPanel = ToolTooltipPanel()
+    private var tooltipsPrimed = false
     private var arrowStyleMenu: ArrowStyleMenuPanel!
 
     init(frame: NSRect, showsCopyButton: Bool = true) {
@@ -1885,6 +1891,7 @@ final class ToolbarPillView: NSView {
             btn.target = self
             btn.action = #selector(toolTapped(_:))
             btn.tool = tool
+            btn.areTooltipsPrimed = { [weak self] in self?.tooltipsPrimed ?? false }
             btn.onTooltipRequested = { [weak self] screenRect in
                 self?.showTooltip(for: tool, at: screenRect)
             }
@@ -1969,6 +1976,7 @@ final class ToolbarPillView: NSView {
     }
 
     private func showTooltip(for tool: AnnotationTool, at screenRect: NSRect) {
+        tooltipsPrimed = true
         tooltipPanel.show(for: tool, aboveScreenRect: screenRect)
     }
 

@@ -129,12 +129,12 @@ enum RecordingBackgroundRenderer {
         return nsImage(from: image, logicalSize: Self.canvasSize(for: 1))
     }
 
-    /// Full-image effect used outside a spotlight cutout (blur or desaturate).
+    /// Full-image blur used outside a spotlight cutout.
     static func spotlightSuppressionImage(
         from background: NSImage,
-        technique: SpotlightTechnique
+        radius: CGFloat
     ) -> NSImage? {
-        guard technique != .dim else { return nil }
+        guard radius > 0 else { return nil }
         guard let cgImage = background.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
             return nil
         }
@@ -142,23 +142,10 @@ enum RecordingBackgroundRenderer {
         let extent = input.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
 
-        let output: CIImage?
-        switch technique {
-        case .dim:
-            output = nil
-        case .blur:
-            guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
-            filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
-            filter.setValue(15.0, forKey: kCIInputRadiusKey)
-            output = filter.outputImage?.cropped(to: extent)
-        case .desaturate:
-            guard let filter = CIFilter(name: "CIColorControls") else { return nil }
-            filter.setValue(input, forKey: kCIInputImageKey)
-            filter.setValue(0.0, forKey: kCIInputSaturationKey)
-            output = filter.outputImage?.cropped(to: extent)
-        }
-
-        guard let output,
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
+        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        filter.setValue(radius, forKey: kCIInputRadiusKey)
+        guard let output = filter.outputImage?.cropped(to: extent),
               let resultCG = ciContext.createCGImage(output, from: extent) else { return nil }
         return NSImage(cgImage: resultCG, size: background.size)
     }

@@ -9,6 +9,40 @@ import Foundation
 enum AppSettings {
     private static let destinationFolderKey = "destinationFolderPath"
 
+    static let spotlightDimOpacityNotches: [CGFloat] = [0, 0.05, 0.15, 0.30, 0.60]
+    static let spotlightBlurRadiusNotches: [CGFloat] = [0, 1, 2, 5, 10]
+    static let spotlightSoftnessNotches: [CGFloat] = [0, 2, 4, 8, 16]
+    static let spotlightDimOpacityDefault: CGFloat = 0.30
+    static let spotlightBlurRadiusDefault: CGFloat = 5
+    static let spotlightSoftnessDefault: CGFloat = 0
+
+    static func snapSpotlightDimOpacity(_ value: CGFloat) -> CGFloat {
+        spotlightDimOpacityNotches.min(by: { abs($0 - value) < abs($1 - value) }) ?? spotlightDimOpacityDefault
+    }
+
+    static func snapSpotlightBlurRadius(_ value: CGFloat) -> CGFloat {
+        spotlightBlurRadiusNotches.min(by: { abs($0 - value) < abs($1 - value) }) ?? spotlightBlurRadiusDefault
+    }
+
+    static func snapSpotlightSoftness(_ value: CGFloat) -> CGFloat {
+        spotlightSoftnessNotches.min(by: { abs($0 - value) < abs($1 - value) }) ?? spotlightSoftnessDefault
+    }
+
+    static func spotlightDimOpacityIndex(for value: CGFloat) -> Int {
+        let snapped = snapSpotlightDimOpacity(value)
+        return spotlightDimOpacityNotches.firstIndex(of: snapped) ?? 3
+    }
+
+    static func spotlightBlurRadiusIndex(for value: CGFloat) -> Int {
+        let snapped = snapSpotlightBlurRadius(value)
+        return spotlightBlurRadiusNotches.firstIndex(of: snapped) ?? 3
+    }
+
+    static func spotlightSoftnessIndex(for value: CGFloat) -> Int {
+        let snapped = snapSpotlightSoftness(value)
+        return spotlightSoftnessNotches.firstIndex(of: snapped) ?? 0
+    }
+
     static var destinationFolderURL: URL {
         get {
             if let path = UserDefaults.standard.string(forKey: destinationFolderKey) {
@@ -39,6 +73,7 @@ enum AppSettings {
             withIntermediateDirectories: true
         )
     }
+
 }
 
 final class SettingsWindow: NSWindow {

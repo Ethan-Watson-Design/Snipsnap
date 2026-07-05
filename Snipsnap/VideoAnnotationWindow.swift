@@ -496,12 +496,66 @@ final class VideoAnnotationWindow: NSWindow {
 
     // MARK: - Wire
 
+    private func updateToolbarAccessoryControls() {
+        pill.showsSpotlightAccessoryControls = canvas.prefersSpotlightToolbarAccessory()
+        pill.spotlightAffectsAllInstances = canvas.appliesSpotlightEffectGlobally
+        if let settings = canvas.spotlightSettingsForEditing() {
+            pill.selectedSpotlightDimOpacity = AppSettings.snapSpotlightDimOpacity(settings.dimOpacity)
+            pill.selectedSpotlightBlurRadius = AppSettings.snapSpotlightBlurRadius(settings.blurRadius)
+            pill.selectedSpotlightSoftness = AppSettings.snapSpotlightSoftness(settings.softness)
+            pill.spotlightOptionsRegion = settings.region
+            canvas.selectedSpotlightDimOpacity = settings.dimOpacity
+            canvas.selectedSpotlightBlurRadius = settings.blurRadius
+            canvas.selectedSpotlightSoftness = settings.softness
+        } else if canvas.selectedTool == .spotlight {
+            pill.selectedSpotlightDimOpacity = canvas.selectedSpotlightDimOpacity
+            pill.selectedSpotlightBlurRadius = canvas.selectedSpotlightBlurRadius
+            pill.selectedSpotlightSoftness = canvas.selectedSpotlightSoftness
+        }
+        syncToolbarPreferencesFromSelection()
+    }
+
+    private func syncToolbarPreferencesFromSelection() {
+        guard canvas.selectedTool == .select,
+              let idx = canvas.selectedIndex,
+              canvas.annotations.indices.contains(idx) else { return }
+
+        switch canvas.annotations[idx].content {
+        case let .stroke(_, color, _, tool):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+            pill.selectedStrokeTool = tool
+            canvas.selectedStrokeTool = tool
+        case let .arrow(_, _, _, color, tipStyle, pathStyle, _):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+            pill.selectedArrowTipStyle = tipStyle
+            canvas.selectedArrowTipStyle = tipStyle
+            pill.selectedArrowPathStyle = pathStyle
+            canvas.selectedArrowPathStyle = pathStyle
+        case let .rect(_, color):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+        case let .text(_, _, color, _):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+        case let .emoji(_, _, _, color):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+        case .spotlight, .zoom, .crop:
+            break
+        }
+    }
+
     private func wire() {
         canvas.videoMode = true
         canvas.allowedTools = Set(AnnotationTool.videoTools)
         canvas.selectedTool = .zoom
         pill.selectedTool = .zoom
         pill.selectedColor = NSColor.annotationPalette[0]
+        pill.selectedSpotlightDimOpacity = canvas.selectedSpotlightDimOpacity
+        pill.selectedSpotlightBlurRadius = canvas.selectedSpotlightBlurRadius
+        pill.selectedSpotlightSoftness = canvas.selectedSpotlightSoftness
 
         playerView.zoomAnnotationsProvider = { [weak self] in
             self?.canvas.annotations ?? []
@@ -510,6 +564,7 @@ final class VideoAnnotationWindow: NSWindow {
 
         canvas.onSelectionChanged = { [weak self] index in
             self?.updateTimelineSelection(for: index)
+            self?.updateToolbarAccessoryControls()
         }
 
         timeline.onSeek = { [weak self] time in
@@ -555,6 +610,13 @@ final class VideoAnnotationWindow: NSWindow {
 
         canvas.onToolChanged = { [weak self] tool in
             self?.pill.selectedTool = tool
+            self?.updateToolbarAccessoryControls()
+        }
+
+        canvas.onSelectionGeometryChanged = { [weak self] in
+            guard let self,
+                  let settings = self.canvas.spotlightSettingsForEditing() else { return }
+            self.pill.syncSpotlightOptionsPanelRegion(settings.region)
         }
 
         canvas.onEscapeAction = { [weak self] in
@@ -565,6 +627,7 @@ final class VideoAnnotationWindow: NSWindow {
             guard let self else { return }
             canvas.selectedTool = tool
             pill.selectedTool = tool
+            updateToolbarAccessoryControls()
         }
 
         pill.onColorSelected = { [weak self] color in
@@ -590,6 +653,60 @@ final class VideoAnnotationWindow: NSWindow {
             guard let self else { return }
             canvas.selectedArrowPathStyle = style
             pill.selectedArrowPathStyle = style
+        }
+
+        pill.onSpotlightDimOpacityChanged = { [weak self] opacity in
+            guard let self else { return }
+            canvas.applySpotlightDimOpacity(opacity)
+            pill.selectedSpotlightDimOpacity = opacity
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightBlurRadiusChanged = { [weak self] radius in
+            guard let self else { return }
+            canvas.applySpotlightBlurRadius(radius)
+            pill.selectedSpotlightBlurRadius = radius
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightSoftnessChanged = { [weak self] softness in
+            guard let self else { return }
+            canvas.applySpotlightSoftness(softness)
+            pill.selectedSpotlightSoftness = softness
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightRegionChanged = { [weak self] region in
+            guard let self else { return }
+            canvas.applySpotlightRegion(region)
+            pill.spotlightOptionsRegion = region
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightOptionsWillShow = { [weak self] in
+            guard let self else { return }
+            let affectsAll = canvas.appliesSpotlightEffectGlobally
+            if let settings = canvas.spotlightSettingsForEditing() {
+                pill.syncSpotlightOptionsPanel(
+                    dimOpacity: settings.dimOpacity,
+                    blurRadius: settings.blurRadius,
+                    softness: settings.softness,
+                    region: settings.region,
+                    affectsAllSpotlights: affectsAll
+                )
+            } else {
+                pill.syncSpotlightOptionsPanel(
+                    dimOpacity: canvas.selectedSpotlightDimOpacity,
+                    blurRadius: canvas.selectedSpotlightBlurRadius,
+                    softness: canvas.selectedSpotlightSoftness,
+                    region: pill.spotlightOptionsRegion,
+                    affectsAllSpotlights: affectsAll
+                )
+            }
+        }
+
+        pill.onSpotlightOptionsEditingEnded = { [weak self] in
+            self?.canvas.commitSpotlightEditUndo()
         }
 
         timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in

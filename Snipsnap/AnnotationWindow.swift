@@ -41,8 +41,17 @@ enum StrokeTool: Equatable, CaseIterable {
 enum AnnotationTool: Hashable {
     case select, draw, arrow, rect, spotlight, zoom, crop, text, emoji
 
+    /// Preferred spotlight glyph needs SF Symbols 7 (macOS 26+); fall back on older systems.
+    private static let spotlightSfSymbol: String = {
+        let preferred = "squareshape.on.pattern.diagonalline"
+        if NSImage(systemSymbolName: preferred, accessibilityDescription: nil) != nil {
+            return preferred
+        }
+        return "squareshape.dotted.squareshape"
+    }()
+
     static let screenshotTools: [AnnotationTool] = [
-        .select, .draw, .arrow, .rect, .spotlight, .crop, .text, .emoji
+        .select, .spotlight, .crop, .text, .emoji
     ]
     static let videoTools: [AnnotationTool] = [
         .zoom, .text
@@ -54,7 +63,7 @@ enum AnnotationTool: Hashable {
         case .draw:      return "scribble"
         case .arrow:     return "arrow.up.right"
         case .rect:      return "rectangle"
-        case .spotlight: return "flashlight.on.fill"
+        case .spotlight: return Self.spotlightSfSymbol
         case .zoom:      return "plus.magnifyingglass"
         case .crop:      return "crop"
         case .text:      return "textformat"
@@ -87,28 +96,6 @@ enum AnnotationTool: Hashable {
         case .crop:      return "C"
         case .text:      return "T"
         case .emoji:     return "E"
-        }
-    }
-}
-
-enum SpotlightTechnique: String, Equatable, CaseIterable {
-    case dim, blur, desaturate
-
-    var menuSymbol: String {
-        switch self {
-        case .dim:         return "circle.lefthalf.filled"
-        case .blur:        return "drop.halffull"
-        case .desaturate:  return "paintpalette"
-        }
-    }
-
-    var menuSymbolPointSize: CGFloat { 13 }
-
-    var accessibilityLabel: String {
-        switch self {
-        case .dim:         return "Dim"
-        case .blur:        return "Blur"
-        case .desaturate:  return "Desaturate"
         }
     }
 }
@@ -170,7 +157,7 @@ enum Annotation {
     case stroke(points: [CGPoint], color: NSColor, lineWidth: CGFloat, tool: StrokeTool)
     case arrow(from: CGPoint, to: CGPoint, bend: CGPoint?, color: NSColor, tipStyle: ArrowTipStyle, pathStyle: ArrowPathStyle, seed: UInt64)
     case rect(rect: CGRect, color: NSColor)
-    case spotlight(region: CGRect, technique: SpotlightTechnique)
+    case spotlight(region: CGRect, dimOpacity: CGFloat, blurRadius: CGFloat, softness: CGFloat)
     case zoom(rect: CGRect)
     case crop(rect: CGRect)
     case text(origin: CGPoint, text: String, color: NSColor, maxWidth: CGFloat?)
@@ -815,13 +802,15 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     var selectedStrokeTool: StrokeTool = .marker
     var selectedArrowTipStyle: ArrowTipStyle = .solid
     var selectedArrowPathStyle: ArrowPathStyle = .autoBend
-    /// Last-used spotlight technique (recents, same as stroke color/weight).
-    var selectedSpotlightTechnique: SpotlightTechnique = .dim
-    /// Stage background for spotlight blur/desaturate (canvas-sized).
+    /// Last-used spotlight settings (recents, same as stroke color/weight).
+    var selectedSpotlightDimOpacity: CGFloat = AppSettings.spotlightDimOpacityDefault
+    var selectedSpotlightBlurRadius: CGFloat = AppSettings.spotlightBlurRadiusDefault
+    var selectedSpotlightSoftness: CGFloat = AppSettings.spotlightSoftnessDefault
+    /// Stage background for spotlight blur (canvas-sized).
     var stageBackgroundImage: NSImage?
     /// Stable seed for the in-progress squiggle arrow.
     private var activeArrowSeed: UInt64 = 1
-    private var spotlightEffectCache: (technique: SpotlightTechnique, imageID: ObjectIdentifier, image: NSImage)?
+    private var spotlightEffectCache: (roundedRadius: CGFloat, imageID: ObjectIdentifier, image: NSImage)?
 
     /// When true, annotations are filtered by playback time and stamped on commit.
     var videoMode: Bool = false
@@ -1053,16 +1042,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         ctx.setLineJoin(.round)
 
         // Spotlights first so they suppress the capture, not other annotations.
-        for placed in annotations {
-            if case .crop = placed.content { continue }
-            guard case let .spotlight(region, technique) = placed.content else { continue }
-            if !videoMode || placed.isVisible(at: playbackTime) {
-                renderSpotlight(region: region, technique: technique, in: ctx)
-            }
-        }
-        if case let .spotlight(region, technique)? = currentAnnotation {
-            renderSpotlight(region: region, technique: technique, in: ctx)
-        }
+        renderSpotlightLayers(
+            annotations: annotations,
+            current: currentAnnotation,
+            at: playbackTime,
+            in: ctx
+        )
 
         for placed in annotations {
             if case .crop = placed.content { continue }
@@ -1097,7 +1082,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 drawTextSelectionHandles(metrics: textMetrics(origin: origin, text: text, maxWidth: maxWidth), in: ctx)
             case let .rect(rect, _):
                 drawRectAnnotationSelectionHandles(rect: rect, in: ctx)
-            case let .spotlight(region, _):
+            case let .spotlight(region, _, _, _):
                 drawRectAnnotationSelectionHandles(rect: region, in: ctx)
             case let .zoom(rect):
                 drawRectAnnotationSelectionHandles(rect: rect, in: ctx)
@@ -1429,33 +1414,137 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         }
     }
 
-    private func renderSpotlight(
-        region: CGRect,
-        technique: SpotlightTechnique,
+    private struct SpotlightRenderEntry {
+        let region: CGRect
+        let dimOpacity: CGFloat
+        let blurRadius: CGFloat
+        let softness: CGFloat
+    }
+
+    private func renderSpotlightLayers(
+        annotations: [PlacedAnnotation],
+        current: Annotation?,
+        at time: Double,
         in ctx: CGContext,
-        canvasBounds: CGRect? = nil
+        canvasBounds: CGRect? = nil,
+        annotationOffset: CGPoint = .zero
     ) {
-        guard region.width > 0.5, region.height > 0.5 else { return }
+        var entries: [SpotlightRenderEntry] = []
+
+        func append(region: CGRect, dimOpacity: CGFloat, blurRadius: CGFloat, softness: CGFloat) {
+            guard region.width > 0.5, region.height > 0.5 else { return }
+            guard dimOpacity > 0 || blurRadius > 0 else { return }
+            let offsetRegion = annotationOffset == .zero
+                ? region
+                : region.offsetBy(dx: annotationOffset.x, dy: annotationOffset.y)
+            entries.append(
+                SpotlightRenderEntry(
+                    region: offsetRegion,
+                    dimOpacity: dimOpacity,
+                    blurRadius: blurRadius,
+                    softness: softness
+                )
+            )
+        }
+
+        for placed in annotations {
+            if case .crop = placed.content { continue }
+            guard case let .spotlight(region, dimOpacity, blurRadius, softness) = placed.content else { continue }
+            if !videoMode || placed.isVisible(at: time) {
+                append(
+                    region: region,
+                    dimOpacity: dimOpacity,
+                    blurRadius: blurRadius,
+                    softness: softness
+                )
+            }
+        }
+        if case let .spotlight(region, dimOpacity, blurRadius, softness) = current {
+            append(
+                region: region,
+                dimOpacity: dimOpacity,
+                blurRadius: blurRadius,
+                softness: softness
+            )
+        }
+
+        guard !entries.isEmpty else { return }
         let bounds = canvasBounds ?? self.bounds
+        let cutoutMaskItems = entries.map {
+            (path: spotlightCutoutPath(for: $0.region), feather: $0.softness)
+        }
+        let outsideMask = combinedSpotlightOutsideClipMask(cutouts: cutoutMaskItems, bounds: bounds)
+
+        ctx.saveGState()
+        for entry in entries {
+            ctx.saveGState()
+            ctx.setBlendMode(.darken)
+            if let outsideMask {
+                ctx.clip(to: bounds, mask: outsideMask)
+            }
+            drawSpotlightSuppression(
+                bounds: bounds,
+                dimOpacity: entry.dimOpacity,
+                blurRadius: entry.blurRadius,
+                in: ctx
+            )
+            ctx.restoreGState()
+        }
+        ctx.restoreGState()
+    }
+
+    /// Merges per-spotlight outside clip masks so any lit region stays lit (union).
+    private func combinedSpotlightOutsideClipMask(
+        cutouts: [(path: CGPath, feather: CGFloat)],
+        bounds: CGRect
+    ) -> CGImage? {
+        var combined: CGImage?
+        for item in cutouts {
+            guard let mask = spotlightClipMask(
+                cutouts: [item.path],
+                bounds: bounds,
+                feather: item.feather
+            ) else { continue }
+            if let existing = combined {
+                combined = multiplyGrayscaleMasks(existing, mask)
+            } else {
+                combined = mask
+            }
+        }
+        return combined
+    }
+
+    private func multiplyGrayscaleMasks(_ lhs: CGImage, _ rhs: CGImage) -> CGImage? {
+        let inputA = CIImage(cgImage: lhs)
+        let inputB = CIImage(cgImage: rhs)
+        guard let filter = CIFilter(name: "CIMultiplyCompositing") else { return lhs }
+        filter.setValue(inputB, forKey: kCIInputImageKey)
+        filter.setValue(inputA, forKey: kCIInputBackgroundImageKey)
+        guard let output = filter.outputImage,
+              let result = RecordingBackgroundRenderer.ciContext.createCGImage(output, from: output.extent) else {
+            return lhs
+        }
+        return result
+    }
+
+    private func spotlightCutoutPath(for region: CGRect) -> CGPath {
         let radius = Annotation.spotlightCornerRadius
-        let cutout = CGPath(
+        return CGPath(
             roundedRect: region,
             cornerWidth: min(radius, region.width / 2),
             cornerHeight: min(radius, region.height / 2),
             transform: nil
         )
+    }
 
-        ctx.saveGState()
-        ctx.addRect(bounds)
-        ctx.addPath(cutout)
-        ctx.clip(using: .evenOdd)
-
-        switch technique {
-        case .dim:
-            ctx.setFillColor(NSColor.black.withAlphaComponent(0.45).cgColor)
-            ctx.fill(bounds)
-        case .blur, .desaturate:
-            if let effect = spotlightSuppressionImage(for: technique) {
+    private func drawSpotlightSuppression(
+        bounds: CGRect,
+        dimOpacity: CGFloat,
+        blurRadius: CGFloat,
+        in ctx: CGContext
+    ) {
+        if blurRadius > 0 {
+            if let effect = spotlightSuppressionImage(for: blurRadius) {
                 let imageRect = NSRect(origin: .zero, size: effect.size)
                 effect.draw(
                     in: bounds,
@@ -1463,28 +1552,90 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                     operation: .sourceOver,
                     fraction: 1.0
                 )
-            } else {
-                // Fallback while background is unavailable.
-                ctx.setFillColor(NSColor.black.withAlphaComponent(0.45).cgColor)
-                ctx.fill(bounds)
             }
         }
-        ctx.restoreGState()
+
+        if dimOpacity > 0 {
+            ctx.setFillColor(NSColor.black.withAlphaComponent(dimOpacity).cgColor)
+            ctx.fill(bounds)
+        }
     }
 
-    private func spotlightSuppressionImage(for technique: SpotlightTechnique) -> NSImage? {
+    /// Builds a clip mask where lit regions are the union of all cutouts (overlaps stay lit).
+    private func spotlightClipMask(
+        cutouts: [CGPath],
+        bounds: CGRect,
+        feather: CGFloat
+    ) -> CGImage? {
+        guard bounds.width >= 1, bounds.height >= 1 else { return nil }
+
+        let width = Int(bounds.width.rounded(.up))
+        let height = Int(bounds.height.rounded(.up))
+        let pixelSize = CGSize(width: width, height: height)
+
+        func makeContext() -> CGContext? {
+            guard let ctx = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            ) else { return nil }
+            ctx.translateBy(x: -bounds.origin.x, y: -bounds.origin.y)
+            return ctx
+        }
+
+        guard let maskCtx = makeContext() else { return nil }
+
+        maskCtx.setFillColor(gray: 1, alpha: 1)
+        maskCtx.fill(bounds)
+        maskCtx.setFillColor(gray: 0, alpha: 1)
+        for cutout in cutouts {
+            maskCtx.addPath(cutout)
+            maskCtx.fillPath(using: .winding)
+        }
+
+        guard let rawMask = maskCtx.makeImage() else { return nil }
+        guard feather > 0 else { return rawMask }
+
+        let input = CIImage(cgImage: rawMask)
+        let extent = input.extent
+        guard let filter = CIFilter(name: "CIGaussianBlur") else { return rawMask }
+        filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+        filter.setValue(feather, forKey: kCIInputRadiusKey)
+        guard let output = filter.outputImage?.cropped(to: extent),
+              let blurred = RecordingBackgroundRenderer.ciContext.createCGImage(output, from: extent) else {
+            return rawMask
+        }
+
+        // Re-punch cutout interiors so blur only feathers outward, not into the holes.
+        guard let finalCtx = makeContext() else { return blurred }
+        finalCtx.draw(blurred, in: CGRect(origin: .zero, size: pixelSize))
+        finalCtx.setFillColor(gray: 0, alpha: 1)
+        for cutout in cutouts {
+            finalCtx.addPath(cutout)
+            finalCtx.fillPath(using: .winding)
+        }
+        return finalCtx.makeImage()
+    }
+
+    private func spotlightSuppressionImage(for blurRadius: CGFloat) -> NSImage? {
+        guard blurRadius > 0 else { return nil }
         guard let background = stageBackgroundImage else { return nil }
+        let roundedRadius = blurRadius.rounded()
         let imageID = ObjectIdentifier(background)
         if let cache = spotlightEffectCache,
-           cache.technique == technique,
+           cache.roundedRadius == roundedRadius,
            cache.imageID == imageID {
             return cache.image
         }
         guard let image = RecordingBackgroundRenderer.spotlightSuppressionImage(
             from: background,
-            technique: technique
+            radius: roundedRadius
         ) else { return nil }
-        spotlightEffectCache = (technique, imageID, image)
+        spotlightEffectCache = (roundedRadius, imageID, image)
         return image
     }
 
@@ -1701,29 +1852,170 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private func commitPlacedArrow(_ content: Annotation) {
         appendAnnotation(content)
         resetArrowPlacement()
+        setSelectedIndex(annotations.count - 1)
         selectedTool = .select
         onToolChanged?(.select)
-        setSelectedIndex(annotations.count - 1)
     }
 
     private func commitPlacedSpotlight(_ content: Annotation) {
+        if case let .spotlight(_, dimOpacity, blurRadius, softness) = content {
+            selectedSpotlightDimOpacity = AppSettings.snapSpotlightDimOpacity(dimOpacity)
+            selectedSpotlightBlurRadius = AppSettings.snapSpotlightBlurRadius(blurRadius)
+            selectedSpotlightSoftness = AppSettings.snapSpotlightSoftness(softness)
+        }
         appendAnnotation(content)
         currentAnnotation = nil
+        setSelectedIndex(annotations.count - 1)
         selectedTool = .select
         onToolChanged?(.select)
-        setSelectedIndex(annotations.count - 1)
+        needsDisplay = true
     }
 
-    /// Updates the default technique and, when a spotlight is selected, its live technique.
-    func applySpotlightTechnique(_ technique: SpotlightTechnique) {
-        selectedSpotlightTechnique = technique
-        guard let idx = selectedIndex,
-              annotations.indices.contains(idx),
-              case let .spotlight(region, current) = annotations[idx].content,
-              current != technique else { return }
+    /// Whether the toolbar should show spotlight controls instead of the color swatch.
+    func prefersSpotlightToolbarAccessory() -> Bool {
+        selectedTool == .spotlight || spotlightSettingsForEditing() != nil
+    }
+
+    /// Spotlight settings for the options panel (selected or in-progress annotation).
+    func spotlightSettingsForEditing() -> (dimOpacity: CGFloat, blurRadius: CGFloat, softness: CGFloat, region: CGRect)? {
+        if let idx = selectedIndex,
+           annotations.indices.contains(idx),
+           case let .spotlight(region, dimOpacity, blurRadius, softness) = annotations[idx].content {
+            return (dimOpacity, blurRadius, softness, region)
+        }
+        if case let .spotlight(region, dimOpacity, blurRadius, softness)? = currentAnnotation {
+            return (dimOpacity, blurRadius, softness, region)
+        }
+        return nil
+    }
+
+    func spotlightAnnotationCount() -> Int {
+        var count = annotations.reduce(into: 0) { partial, placed in
+            if case .spotlight = placed.content { partial += 1 }
+        }
+        if case .spotlight = currentAnnotation { count += 1 }
+        return count
+    }
+
+    var appliesSpotlightEffectGlobally: Bool {
+        spotlightAnnotationCount() > 1
+    }
+
+    private func updateEditableSpotlight(
+        region: CGRect? = nil,
+        dimOpacity: CGFloat? = nil,
+        blurRadius: CGFloat? = nil,
+        softness: CGFloat? = nil,
+        pushUndo: Bool = true
+    ) {
+        if let dimOpacity { selectedSpotlightDimOpacity = dimOpacity }
+        if let blurRadius { selectedSpotlightBlurRadius = blurRadius }
+        if let softness { selectedSpotlightSoftness = softness }
+
+        if let idx = selectedIndex,
+           annotations.indices.contains(idx),
+           case let .spotlight(currentRegion, currentDim, currentBlur, currentSoftness) = annotations[idx].content {
+            let newContent: Annotation = .spotlight(
+                region: region ?? currentRegion,
+                dimOpacity: dimOpacity ?? currentDim,
+                blurRadius: blurRadius ?? currentBlur,
+                softness: softness ?? currentSoftness
+            )
+            if pushUndo { pushUndoState() }
+            annotations[idx].content = newContent
+            needsDisplay = true
+            onSelectionGeometryChanged?()
+            return
+        }
+
+        if case let .spotlight(currentRegion, currentDim, currentBlur, currentSoftness)? = currentAnnotation {
+            currentAnnotation = .spotlight(
+                region: region ?? currentRegion,
+                dimOpacity: dimOpacity ?? currentDim,
+                blurRadius: blurRadius ?? currentBlur,
+                softness: softness ?? currentSoftness
+            )
+            needsDisplay = true
+            onSelectionGeometryChanged?()
+        }
+    }
+
+    func applySpotlightSoftness(_ softness: CGFloat) {
+        let snapped = AppSettings.snapSpotlightSoftness(softness)
+        selectedSpotlightSoftness = snapped
+        if appliesSpotlightEffectGlobally {
+            updateAllSpotlights(softness: snapped)
+        } else {
+            updateEditableSpotlight(softness: snapped, pushUndo: false)
+        }
+    }
+
+    func applySpotlightDimOpacity(_ opacity: CGFloat) {
+        let snapped = AppSettings.snapSpotlightDimOpacity(opacity)
+        selectedSpotlightDimOpacity = snapped
+        if appliesSpotlightEffectGlobally {
+            updateAllSpotlights(dimOpacity: snapped)
+        } else {
+            updateEditableSpotlight(dimOpacity: snapped, pushUndo: false)
+        }
+    }
+
+    func applySpotlightBlurRadius(_ radius: CGFloat) {
+        let snapped = AppSettings.snapSpotlightBlurRadius(radius)
+        selectedSpotlightBlurRadius = snapped
+        if appliesSpotlightEffectGlobally {
+            updateAllSpotlights(blurRadius: snapped)
+        } else {
+            updateEditableSpotlight(blurRadius: snapped, pushUndo: false)
+        }
+    }
+
+    private func updateAllSpotlights(
+        dimOpacity: CGFloat? = nil,
+        blurRadius: CGFloat? = nil,
+        softness: CGFloat? = nil
+    ) {
+        var changed = false
+
+        for index in annotations.indices {
+            guard case let .spotlight(region, currentDim, currentBlur, currentSoftness) = annotations[index].content else {
+                continue
+            }
+            annotations[index].content = .spotlight(
+                region: region,
+                dimOpacity: dimOpacity ?? currentDim,
+                blurRadius: blurRadius ?? currentBlur,
+                softness: softness ?? currentSoftness
+            )
+            changed = true
+        }
+
+        if case let .spotlight(region, currentDim, currentBlur, currentSoftness)? = currentAnnotation {
+            currentAnnotation = .spotlight(
+                region: region,
+                dimOpacity: dimOpacity ?? currentDim,
+                blurRadius: blurRadius ?? currentBlur,
+                softness: softness ?? currentSoftness
+            )
+            changed = true
+        }
+
+        if let dimOpacity { selectedSpotlightDimOpacity = dimOpacity }
+        if let blurRadius { selectedSpotlightBlurRadius = blurRadius }
+        if let softness { selectedSpotlightSoftness = softness }
+
+        if changed {
+            needsDisplay = true
+            onSelectionGeometryChanged?()
+        }
+    }
+
+    func applySpotlightRegion(_ region: CGRect) {
+        updateEditableSpotlight(region: region, pushUndo: false)
+    }
+
+    func commitSpotlightEditUndo() {
         pushUndoState()
-        annotations[idx].content = .spotlight(region: region, technique: technique)
-        needsDisplay = true
     }
 
     private func handleArrowMouseUp(at pt: CGPoint, forceStraight: Bool) {
@@ -1853,7 +2145,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             dragStart = pt
             currentAnnotation = .spotlight(
                 region: CGRect(origin: pt, size: .zero),
-                technique: selectedSpotlightTechnique
+                dimOpacity: selectedSpotlightDimOpacity,
+                blurRadius: selectedSpotlightBlurRadius,
+                softness: selectedSpotlightSoftness
             )
         case .zoom:
             dragStart = pt
@@ -1933,7 +2227,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                     x: min(dragStart.x, pt.x), y: min(dragStart.y, pt.y),
                     width: abs(pt.x - dragStart.x), height: abs(pt.y - dragStart.y)
                 ),
-                technique: selectedSpotlightTechnique
+                dimOpacity: selectedSpotlightDimOpacity,
+                blurRadius: selectedSpotlightBlurRadius,
+                softness: selectedSpotlightSoftness
             )
         case .zoom:
             currentAnnotation = .zoom(
@@ -2035,10 +2331,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                             rect: resizedRect(anchor: anchor, handle: handle, to: pt),
                             color: color
                         )
-                    } else if case let .spotlight(_, technique) = annotations[idx].content {
+                    } else if case let .spotlight(_, dimOpacity, blurRadius, softness) = annotations[idx].content {
                         annotations[idx].content = .spotlight(
                             region: resizedRect(anchor: anchor, handle: handle, to: pt),
-                            technique: technique
+                            dimOpacity: dimOpacity,
+                            blurRadius: blurRadius,
+                            softness: softness
                         )
                     } else if case .zoom = annotations[idx].content {
                         annotations[idx].content = .zoom(
@@ -2078,7 +2376,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         }
 
         if selectedTool == .spotlight, let cur = currentAnnotation {
-            if case let .spotlight(region, _) = cur, region.width > 2, region.height > 2 {
+            if case let .spotlight(region, _, _, _) = cur, region.width > 2, region.height > 2 {
                 commitPlacedSpotlight(cur)
             } else {
                 currentAnnotation = nil
@@ -2290,7 +2588,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 selectDragMode = .moveWhole
                 dragOffset = point
             }
-        } else if case let .spotlight(region, _) = annotation {
+        } else if case let .spotlight(region, _, _, _) = annotation {
             if let handle = rectHitTestHandle(at: point, in: region) {
                 selectDragMode = .rectResize(handle: handle, anchor: region)
             } else {
@@ -2421,7 +2719,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             return rectHitTestHandle(at: point, in: rect) != nil
                 || rectInterior(of: rect).contains(point)
                 || rect.insetBy(dx: -rectCornerHitRadius, dy: -rectCornerHitRadius).contains(point)
-        case let .spotlight(region, _):
+        case let .spotlight(region, _, _, _):
             return rectHitTestHandle(at: point, in: region) != nil
                 || rectInterior(of: region).contains(point)
                 || region.insetBy(dx: -rectCornerHitRadius, dy: -rectCornerHitRadius).contains(point)
@@ -2507,8 +2805,13 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             )
         case let .rect(rect, color):
             return .rect(rect: mapRect(rect, from: oldContent, to: newContent), color: color)
-        case let .spotlight(region, technique):
-            return .spotlight(region: mapRect(region, from: oldContent, to: newContent), technique: technique)
+        case let .spotlight(region, dimOpacity, blurRadius, softness):
+            return .spotlight(
+                region: mapRect(region, from: oldContent, to: newContent),
+                dimOpacity: dimOpacity,
+                blurRadius: blurRadius * scale,
+                softness: softness
+            )
         case let .zoom(rect):
             return .zoom(rect: mapRect(rect, from: oldContent, to: newContent))
         case let .crop(rect):
@@ -2549,8 +2852,13 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             )
         case let .rect(rect, color):
             return .rect(rect: rect.offsetBy(dx: delta.x, dy: delta.y), color: color)
-        case let .spotlight(region, technique):
-            return .spotlight(region: region.offsetBy(dx: delta.x, dy: delta.y), technique: technique)
+        case let .spotlight(region, dimOpacity, blurRadius, softness):
+            return .spotlight(
+                region: region.offsetBy(dx: delta.x, dy: delta.y),
+                dimOpacity: dimOpacity,
+                blurRadius: blurRadius,
+                softness: softness
+            )
         case let .zoom(rect):
             return .zoom(rect: rect.offsetBy(dx: delta.x, dy: delta.y))
         case let .crop(rect):
@@ -2593,7 +2901,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             )
         case let .rect(rect, _):
             return rect
-        case let .spotlight(region, _):
+        case let .spotlight(region, _, _, _):
             return region
         case let .zoom(rect):
             return rect
@@ -2701,20 +3009,14 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 ctx.scaleBy(x: sx, y: sy)
             }
             let renderBounds = CGRect(origin: .zero, size: canvasSize)
-            for placed in annotations {
-                if !videoMode || placed.isVisible(at: time) {
-                    let content = annotationOffset == .zero
-                        ? placed.content
-                        : moved(placed.content, by: annotationOffset)
-                    guard case let .spotlight(region, technique) = content else { continue }
-                    renderSpotlight(
-                        region: region,
-                        technique: technique,
-                        in: ctx,
-                        canvasBounds: renderBounds
-                    )
-                }
-            }
+            renderSpotlightLayers(
+                annotations: annotations,
+                current: nil,
+                at: time,
+                in: ctx,
+                canvasBounds: renderBounds,
+                annotationOffset: annotationOffset
+            )
             for placed in annotations {
                 if !videoMode || placed.isVisible(at: time) {
                     if case .zoom = placed.content { continue }
@@ -2788,17 +3090,13 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             ctx.scaleBy(x: sx, y: sy)
         }
         let renderBounds = CGRect(origin: .zero, size: canvasSize)
-        for placed in annotations {
-            if placed.isVisible(at: time) {
-                guard case let .spotlight(region, technique) = placed.content else { continue }
-                renderSpotlight(
-                    region: region,
-                    technique: technique,
-                    in: ctx,
-                    canvasBounds: renderBounds
-                )
-            }
-        }
+        renderSpotlightLayers(
+            annotations: annotations,
+            current: nil,
+            at: time,
+            in: ctx,
+            canvasBounds: renderBounds
+        )
         for placed in annotations {
             if placed.isVisible(at: time) {
                 if case .zoom = placed.content { continue }
@@ -3853,6 +4151,467 @@ final class ArrowStyleMenuPanel: NSObject {
     }
 }
 
+// MARK: - Spotlight panel chrome
+
+private enum SpotlightPanelStyle {
+    static let background = NSColor(calibratedHue: 0, saturation: 0, brightness: 0.97, alpha: 1)
+    static let fieldBackground = NSColor.white
+    static let fieldBorder = NSColor.black.withAlphaComponent(0.09)
+    static let fieldCornerRadius: CGFloat = 5
+    static let fieldHeight: CGFloat = 28
+    static let panelWidth: CGFloat = 240
+    static let padding: CGFloat = 12
+    static let sectionGap: CGFloat = 14
+    static let rowGap: CGFloat = 6
+}
+
+/// Figma-style inline metric field: `[X  120]` on a white rounded background.
+private final class SpotlightInlineField: NSView, NSTextFieldDelegate {
+    let prefixLabel = NSTextField(labelWithString: "")
+    let valueField = NSTextField()
+    var onValueChanged: (() -> Void)?
+
+    init(prefix: String) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = SpotlightPanelStyle.fieldBackground.cgColor
+        layer?.cornerRadius = SpotlightPanelStyle.fieldCornerRadius
+        layer?.borderWidth = 1
+        layer?.borderColor = SpotlightPanelStyle.fieldBorder.cgColor
+
+        prefixLabel.stringValue = prefix
+        prefixLabel.font = NSFont.snipsnap(.label)
+        prefixLabel.textColor = DesignTokens.Color.textSecondary.ns
+        prefixLabel.alignment = .left
+        prefixLabel.isBezeled = false
+        prefixLabel.isBordered = false
+        prefixLabel.drawsBackground = false
+        prefixLabel.isEditable = false
+        prefixLabel.isSelectable = false
+
+        valueField.font = NSFont.monospacedDigitSystemFont(ofSize: DesignTokens.Typography.body.size, weight: .regular)
+        valueField.textColor = DesignTokens.Color.textPrimary.ns
+        valueField.alignment = .right
+        valueField.isBezeled = false
+        valueField.isBordered = false
+        valueField.drawsBackground = false
+        valueField.isEditable = true
+        valueField.isSelectable = true
+        valueField.delegate = self
+
+        addSubview(prefixLabel)
+        addSubview(valueField)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        let pad: CGFloat = 8
+        prefixLabel.frame = CGRect(x: pad, y: (bounds.height - 16) / 2, width: 14, height: 16)
+        valueField.frame = CGRect(x: pad + 14, y: (bounds.height - 18) / 2, width: bounds.width - pad * 2 - 14, height: 18)
+    }
+
+    func controlTextDidChange(_ obj: Notification) {
+        onValueChanged?()
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        onValueChanged?()
+    }
+}
+
+/// Five-step notch selector styled as a compact segmented track.
+private final class SpotlightNotchRow: NSControl {
+    var notchCount: Int = 5 { didSet { needsDisplay = true } }
+    var selectedIndex: Int = 0 { didSet { needsDisplay = true } }
+    var onSelectionChanged: ((Int) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = false
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        let index = indexAt(point: convert(event.locationInWindow, from: nil))
+        guard index >= 0, index < notchCount, index != selectedIndex else { return }
+        selectedIndex = index
+        onSelectionChanged?(index)
+    }
+
+    private func indexAt(point: NSPoint) -> Int {
+        guard bounds.width > 0, notchCount > 0 else { return 0 }
+        let fraction = min(max(point.x / bounds.width, 0), 0.999)
+        return Int(fraction * CGFloat(notchCount))
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let track = bounds.insetBy(dx: 0, dy: (bounds.height - 4) / 2)
+        let trackPath = NSBezierPath(roundedRect: track, xRadius: 2, yRadius: 2)
+        SpotlightPanelStyle.fieldBackground.setFill()
+        trackPath.fill()
+        SpotlightPanelStyle.fieldBorder.setStroke()
+        trackPath.lineWidth = 1
+        trackPath.stroke()
+
+        guard notchCount > 1 else { return }
+        let thumbW: CGFloat = 14
+        let travel = track.width - thumbW
+        let thumbX = track.minX + travel * CGFloat(selectedIndex) / CGFloat(notchCount - 1)
+        let thumbRect = CGRect(x: thumbX, y: track.midY - 7, width: thumbW, height: 14)
+        let thumbPath = NSBezierPath(roundedRect: thumbRect, xRadius: 4, yRadius: 4)
+        NSColor.white.setFill()
+        thumbPath.fill()
+        NSColor.black.withAlphaComponent(0.14).setStroke()
+        thumbPath.lineWidth = 1
+        thumbPath.stroke()
+
+        DesignTokens.Color.textTertiary.ns.setFill()
+        for i in 0..<notchCount {
+            let t = track.minX + travel * CGFloat(i) / CGFloat(notchCount - 1) + thumbW / 2
+            let dot = CGRect(x: t - 1.5, y: track.midY - 1.5, width: 3, height: 3)
+            NSBezierPath(ovalIn: dot).fill()
+        }
+    }
+}
+
+// MARK: - SpotlightOptionsPanel
+
+final class SpotlightOptionsPanel: NSObject {
+
+    private let panel: NSPanel
+    private let onDimOpacityChanged: (CGFloat) -> Void
+    private let onBlurRadiusChanged: (CGFloat) -> Void
+    private let onSoftnessChanged: (CGFloat) -> Void
+    private let onRegionChanged: (CGRect) -> Void
+    private let onEditingEnded: () -> Void
+
+    private var dimNotchRow: SpotlightNotchRow!
+    private var blurNotchRow: SpotlightNotchRow!
+    private var softnessNotchRow: SpotlightNotchRow!
+    private var dimValueLabel: NSTextField!
+    private var blurValueLabel: NSTextField!
+    private var softnessValueLabel: NSTextField!
+    private var globalEffectsLabel: NSTextField!
+    private var xField: SpotlightInlineField!
+    private var yField: SpotlightInlineField!
+    private var wField: SpotlightInlineField!
+    private var hField: SpotlightInlineField!
+    private let numberFormatter: NumberFormatter
+    private var clickOutsideMonitor: Any?
+    private var anchorScreenRect: NSRect = .zero
+    private var isUpdatingFromModel = false
+    private var blurDebounceTimer: Timer?
+
+    init(
+        onDimOpacityChanged: @escaping (CGFloat) -> Void,
+        onBlurRadiusChanged: @escaping (CGFloat) -> Void,
+        onSoftnessChanged: @escaping (CGFloat) -> Void,
+        onRegionChanged: @escaping (CGRect) -> Void,
+        onEditingEnded: @escaping () -> Void
+    ) {
+        self.onDimOpacityChanged = onDimOpacityChanged
+        self.onBlurRadiusChanged = onBlurRadiusChanged
+        self.onSoftnessChanged = onSoftnessChanged
+        self.onRegionChanged = onRegionChanged
+        self.onEditingEnded = onEditingEnded
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.maximumFractionDigits = 0
+        formatter.minimum = 0
+        self.numberFormatter = formatter
+
+        let panelW = SpotlightPanelStyle.panelWidth
+        let pad = SpotlightPanelStyle.padding
+        let fieldH = SpotlightPanelStyle.fieldHeight
+        let fieldGap: CGFloat = 8
+        let fieldW = (panelW - pad * 2 - fieldGap) / 2
+        let notchH: CGFloat = 24
+        let headerH: CGFloat = 18
+        let sectionLabelH: CGFloat = 14
+        let metricRowH: CGFloat = 16
+        let globalLabelH: CGFloat = 14
+
+        let effectBlockH = (metricRowH + SpotlightPanelStyle.rowGap + notchH + SpotlightPanelStyle.sectionGap) * 3
+        let positionBlockH = sectionLabelH + SpotlightPanelStyle.rowGap + fieldH + fieldGap + fieldH
+        let panelH = pad + headerH + SpotlightPanelStyle.sectionGap + globalLabelH + SpotlightPanelStyle.rowGap
+            + sectionLabelH + SpotlightPanelStyle.rowGap + effectBlockH
+            + sectionLabelH + SpotlightPanelStyle.rowGap + positionBlockH + pad
+
+        panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: panelW, height: panelH),
+            styleMask: [.nonactivatingPanel, .borderless],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .popUpMenu
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        panel.becomesKeyOnlyIfNeeded = false
+
+        super.init()
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: panelW, height: panelH))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = SpotlightPanelStyle.background.cgColor
+        container.layer?.cornerRadius = DesignTokens.Radius.lg
+        container.layer?.masksToBounds = false
+        DesignTokens.Elevation.panel.apply(to: container.layer!)
+
+        var y = panelH - pad
+
+        y -= headerH
+        let titleLabel = NSTextField(labelWithString: "Spotlight")
+        titleLabel.font = NSFont.snipsnap(.bodyEmphasized)
+        titleLabel.textColor = DesignTokens.Color.textPrimary.ns
+        titleLabel.frame = CGRect(x: pad, y: y, width: panelW - pad * 2, height: headerH)
+        container.addSubview(titleLabel)
+        y -= SpotlightPanelStyle.sectionGap
+
+        y -= globalLabelH
+        let globalLabel = NSTextField(labelWithString: "")
+        globalLabel.font = NSFont.snipsnap(.caption)
+        globalLabel.textColor = DesignTokens.Color.textSecondary.ns
+        globalLabel.frame = CGRect(x: pad, y: y, width: panelW - pad * 2, height: globalLabelH)
+        globalLabel.isHidden = true
+        container.addSubview(globalLabel)
+        globalEffectsLabel = globalLabel
+        y -= SpotlightPanelStyle.rowGap
+
+        func addSectionLabel(_ title: String) {
+            y -= sectionLabelH
+            let label = NSTextField(labelWithString: title)
+            label.font = NSFont.snipsnap(.caption)
+            label.textColor = DesignTokens.Color.textSecondary.ns
+            label.frame = CGRect(x: pad, y: y, width: panelW - pad * 2, height: sectionLabelH)
+            container.addSubview(label)
+            y -= SpotlightPanelStyle.rowGap
+        }
+
+        func addEffectRow(title: String) -> (NSTextField, SpotlightNotchRow) {
+            y -= metricRowH
+            let nameLabel = NSTextField(labelWithString: title)
+            nameLabel.font = NSFont.snipsnap(.label)
+            nameLabel.textColor = DesignTokens.Color.textPrimary.ns
+            nameLabel.frame = CGRect(x: pad, y: y, width: 100, height: metricRowH)
+            container.addSubview(nameLabel)
+
+            let valueLabel = NSTextField(labelWithString: "")
+            valueLabel.font = NSFont.snipsnap(.label)
+            valueLabel.textColor = DesignTokens.Color.textSecondary.ns
+            valueLabel.alignment = .right
+            valueLabel.frame = CGRect(x: panelW - pad - 52, y: y, width: 52, height: metricRowH)
+            container.addSubview(valueLabel)
+
+            y -= SpotlightPanelStyle.rowGap + notchH
+            let notch = SpotlightNotchRow(frame: CGRect(x: pad, y: y, width: panelW - pad * 2, height: notchH))
+            container.addSubview(notch)
+            y -= SpotlightPanelStyle.sectionGap
+            return (valueLabel, notch)
+        }
+
+        addSectionLabel("Effects")
+        (dimValueLabel, dimNotchRow) = addEffectRow(title: "Darkness")
+        (blurValueLabel, blurNotchRow) = addEffectRow(title: "Blurriness")
+        (softnessValueLabel, softnessNotchRow) = addEffectRow(title: "Softness")
+
+        addSectionLabel("Position")
+
+        y -= fieldH
+        xField = SpotlightInlineField(prefix: "X")
+        xField.frame = CGRect(x: pad, y: y, width: fieldW, height: fieldH)
+        container.addSubview(xField)
+
+        yField = SpotlightInlineField(prefix: "Y")
+        yField.frame = CGRect(x: pad + fieldW + fieldGap, y: y, width: fieldW, height: fieldH)
+        container.addSubview(yField)
+        y -= fieldGap + fieldH
+
+        wField = SpotlightInlineField(prefix: "W")
+        wField.frame = CGRect(x: pad, y: y, width: fieldW, height: fieldH)
+        container.addSubview(wField)
+
+        hField = SpotlightInlineField(prefix: "H")
+        hField.frame = CGRect(x: pad + fieldW + fieldGap, y: y, width: fieldW, height: fieldH)
+        container.addSubview(hField)
+
+        xField.valueField.formatter = numberFormatter
+        yField.valueField.formatter = numberFormatter
+        wField.valueField.formatter = numberFormatter
+        hField.valueField.formatter = numberFormatter
+
+        dimNotchRow.onSelectionChanged = { [weak self] index in
+            self?.dimNotchChanged(index)
+        }
+        blurNotchRow.onSelectionChanged = { [weak self] index in
+            self?.blurNotchChanged(index)
+        }
+        softnessNotchRow.onSelectionChanged = { [weak self] index in
+            self?.softnessNotchChanged(index)
+        }
+
+        let regionChanged = { [weak self] in
+            guard let self, !self.isUpdatingFromModel else { return }
+            self.applyRegionFromFields()
+        }
+        xField.onValueChanged = regionChanged
+        yField.onValueChanged = regionChanged
+        wField.onValueChanged = regionChanged
+        hField.onValueChanged = regionChanged
+
+        panel.contentView = container
+    }
+
+    deinit {
+        blurDebounceTimer?.invalidate()
+    }
+
+    func show(
+        aboveScreenRect buttonRect: NSRect,
+        dimOpacity: CGFloat,
+        blurRadius: CGFloat,
+        softness: CGFloat,
+        region: CGRect,
+        affectsAllSpotlights: Bool
+    ) {
+        hide()
+        anchorScreenRect = buttonRect
+        setAffectsAllSpotlights(affectsAllSpotlights)
+        populate(dimOpacity: dimOpacity, blurRadius: blurRadius, softness: softness, region: region)
+
+        let panelW = panel.frame.width
+        let panelX = (buttonRect.midX - panelW / 2).rounded()
+        let panelY = buttonRect.maxY + 6
+        panel.setFrameOrigin(NSPoint(x: panelX, y: panelY))
+        panel.makeKeyAndOrderFront(nil)
+
+        clickOutsideMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            guard let self else { return event }
+            if let contentView = self.panel.contentView {
+                let point = contentView.convert(event.locationInWindow, from: nil)
+                if contentView.bounds.contains(point) { return event }
+            }
+            if self.anchorScreenRect.contains(NSEvent.mouseLocation) { return event }
+            self.hide()
+            return event
+        }
+    }
+
+    func hide() {
+        blurDebounceTimer?.invalidate()
+        blurDebounceTimer = nil
+        if let clickOutsideMonitor {
+            NSEvent.removeMonitor(clickOutsideMonitor)
+            self.clickOutsideMonitor = nil
+        }
+        if panel.isVisible {
+            onEditingEnded()
+        }
+        panel.orderOut(nil)
+    }
+
+    var isVisible: Bool { panel.isVisible }
+
+    func populate(dimOpacity: CGFloat, blurRadius: CGFloat, softness: CGFloat, region: CGRect) {
+        isUpdatingFromModel = true
+        defer { isUpdatingFromModel = false }
+
+        let snappedDim = AppSettings.snapSpotlightDimOpacity(dimOpacity)
+        let snappedBlur = AppSettings.snapSpotlightBlurRadius(blurRadius)
+        let snappedSoftness = AppSettings.snapSpotlightSoftness(softness)
+        dimNotchRow.selectedIndex = AppSettings.spotlightDimOpacityIndex(for: snappedDim)
+        blurNotchRow.selectedIndex = AppSettings.spotlightBlurRadiusIndex(for: snappedBlur)
+        softnessNotchRow.selectedIndex = AppSettings.spotlightSoftnessIndex(for: snappedSoftness)
+        dimNotchRow.needsDisplay = true
+        blurNotchRow.needsDisplay = true
+        softnessNotchRow.needsDisplay = true
+        updateDimLabel(snappedDim)
+        updateBlurLabel(snappedBlur)
+        updateSoftnessLabel(snappedSoftness)
+
+        setInlineField(xField, value: region.origin.x)
+        setInlineField(yField, value: region.origin.y)
+        setInlineField(wField, value: region.width)
+        setInlineField(hField, value: region.height)
+    }
+
+    func updateRegion(_ region: CGRect) {
+        guard !isUpdatingFromModel else { return }
+        isUpdatingFromModel = true
+        setInlineField(xField, value: region.origin.x)
+        setInlineField(yField, value: region.origin.y)
+        setInlineField(wField, value: region.width)
+        setInlineField(hField, value: region.height)
+        isUpdatingFromModel = false
+    }
+
+    func setAffectsAllSpotlights(_ affectsAll: Bool) {
+        globalEffectsLabel.isHidden = !affectsAll
+        globalEffectsLabel.stringValue = affectsAll
+            ? "Effects apply to all spotlights"
+            : ""
+    }
+
+    private func updateDimLabel(_ value: CGFloat) {
+        dimValueLabel.stringValue = "\(Int((value * 100).rounded()))%"
+    }
+
+    private func updateBlurLabel(_ value: CGFloat) {
+        blurValueLabel.stringValue = "\(Int(value.rounded()))"
+    }
+
+    private func updateSoftnessLabel(_ value: CGFloat) {
+        softnessValueLabel.stringValue = "\(Int(value.rounded()))"
+    }
+
+    private func dimNotchChanged(_ index: Int) {
+        let clamped = min(max(index, 0), AppSettings.spotlightDimOpacityNotches.count - 1)
+        let value = AppSettings.spotlightDimOpacityNotches[clamped]
+        dimNotchRow.selectedIndex = clamped
+        updateDimLabel(value)
+        onDimOpacityChanged(value)
+    }
+
+    private func blurNotchChanged(_ index: Int) {
+        let clamped = min(max(index, 0), AppSettings.spotlightBlurRadiusNotches.count - 1)
+        let value = AppSettings.spotlightBlurRadiusNotches[clamped]
+        blurNotchRow.selectedIndex = clamped
+        updateBlurLabel(value)
+        blurDebounceTimer?.invalidate()
+        blurDebounceTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: false) { [weak self] _ in
+            self?.onBlurRadiusChanged(value)
+        }
+    }
+
+    private func softnessNotchChanged(_ index: Int) {
+        let clamped = min(max(index, 0), AppSettings.spotlightSoftnessNotches.count - 1)
+        let value = AppSettings.spotlightSoftnessNotches[clamped]
+        softnessNotchRow.selectedIndex = clamped
+        updateSoftnessLabel(value)
+        onSoftnessChanged(value)
+    }
+
+    private func setInlineField(_ field: SpotlightInlineField, value: CGFloat) {
+        field.valueField.stringValue = numberFormatter.string(from: NSNumber(value: value.rounded())) ?? "0"
+    }
+
+    private func applyRegionFromFields() {
+        guard let x = numberFormatter.number(from: xField.valueField.stringValue)?.doubleValue,
+              let y = numberFormatter.number(from: yField.valueField.stringValue)?.doubleValue,
+              let w = numberFormatter.number(from: wField.valueField.stringValue)?.doubleValue,
+              let h = numberFormatter.number(from: hField.valueField.stringValue)?.doubleValue,
+              w > 0, h > 0 else { return }
+        onRegionChanged(CGRect(x: x, y: y, width: w, height: h))
+    }
+}
+
 // MARK: - ToolHoverButton
 
 final class ToolHoverButton: NSButton {
@@ -3948,12 +4707,14 @@ final class ToolbarPillView: NSView {
     var selectedStrokeTool: StrokeTool = .marker { didSet { refresh() } }
     var selectedArrowTipStyle: ArrowTipStyle = .solid { didSet { refresh() } }
     var selectedArrowPathStyle: ArrowPathStyle = .autoBend { didSet { refresh() } }
-    var selectedSpotlightTechnique: SpotlightTechnique = .dim { didSet { refresh() } }
-    /// When true, the color swatch is replaced by the Dim/Blur/Desaturate picker.
-    var showsSpotlightTechniquePicker: Bool = false {
+    var selectedSpotlightDimOpacity: CGFloat = AppSettings.spotlightDimOpacityDefault { didSet { refresh() } }
+    var selectedSpotlightBlurRadius: CGFloat = AppSettings.spotlightBlurRadiusDefault { didSet { refresh() } }
+    var selectedSpotlightSoftness: CGFloat = AppSettings.spotlightSoftnessDefault { didSet { refresh() } }
+    /// When true, the color swatch is replaced by spotlight accessory controls.
+    var showsSpotlightAccessoryControls: Bool = false {
         didSet {
-            guard oldValue != showsSpotlightTechniquePicker else { return }
-            layoutAccessoryControls()
+            guard oldValue != showsSpotlightAccessoryControls else { return }
+            layoutAccessoryControls(animated: true)
             refresh()
         }
     }
@@ -3964,7 +4725,11 @@ final class ToolbarPillView: NSView {
     var onStrokeToolSelected: ((StrokeTool) -> Void)?
     var onArrowTipStyleSelected: ((ArrowTipStyle) -> Void)?
     var onArrowPathStyleSelected: ((ArrowPathStyle) -> Void)?
-    var onSpotlightTechniqueSelected: ((SpotlightTechnique) -> Void)?
+    var onSpotlightDimOpacityChanged: ((CGFloat) -> Void)?
+    var onSpotlightBlurRadiusChanged: ((CGFloat) -> Void)?
+    var onSpotlightSoftnessChanged: ((CGFloat) -> Void)?
+    var onSpotlightRegionChanged: ((CGRect) -> Void)?
+    var onSpotlightOptionsEditingEnded: (() -> Void)?
     var onCopy: (() -> Void)?
     var onSave: (() -> Void)?
 
@@ -3976,17 +4741,19 @@ final class ToolbarPillView: NSView {
 
     private var toolButtons: [AnnotationTool: ToolHoverButton] = [:]
     private var colorSwatchButton: CircleColorButton!
-    private var techniqueButtons: [SpotlightTechnique: NSButton] = [:]
+    private var spotlightOptionsButton: NSButton!
     private var accessorySeparator: NSView!
     private var trailingSeparator: NSView?
     private let tooltipPanel = ToolTooltipPanel()
     private var tooltipsPrimed = false
     private var drawStyleMenu: DrawStyleMenuPanel!
     private var arrowStyleMenu: ArrowStyleMenuPanel!
+    private(set) var spotlightOptionsMenu: SpotlightOptionsPanel!
     private var colorGridMenu: ColorGridMenuPanel!
     private var customColorPicker: FigmaStyleColorPickerPanel!
     private var backgroundEffect: NSVisualEffectView!
     private let pillHeight: CGFloat = 40
+    private let pillCornerRadius = DesignTokens.Radius.sm
     private let toolButtonSize: CGFloat = 28
     private let toolSectionPadding: CGFloat = 6
     private var toolsSectionEndX: CGFloat = 0
@@ -4005,6 +4772,7 @@ final class ToolbarPillView: NSView {
     private var passThroughMouse = false
     private var pressStartedInToolbar = false
     private var dragCursorTrackingArea: NSTrackingArea?
+    private var isAnimatingAccessoryLayout = false
 
     init(
         frame: NSRect,
@@ -4057,17 +4825,18 @@ final class ToolbarPillView: NSView {
         wantsLayer = true
         if let layer {
             DesignTokens.Elevation.panel.apply(to: layer)
+            layer.cornerRadius = pillCornerRadius
+            layer.cornerCurve = .continuous
         }
 
         let h = pillHeight
-        let vfx = NSVisualEffectView(frame: CGRect(x: 0, y: 0, width: 100, height: h))
+        let vfx = NSVisualEffectView(frame: bounds)
         vfx.autoresizingMask = [.width, .height]
         vfx.material = .menu
         vfx.blendingMode = .withinWindow
         vfx.state = .active
         vfx.wantsLayer = true
-        vfx.layer?.cornerRadius = DesignTokens.Radius.sm
-        vfx.layer?.masksToBounds = true
+        applyPillCornerRadius(to: vfx.layer)
         addSubview(vfx)
         backgroundEffect = vfx
 
@@ -4087,6 +4856,24 @@ final class ToolbarPillView: NSView {
                 guard let self else { return }
                 self.selectedArrowPathStyle = style
                 self.onArrowPathStyleSelected?(style)
+            }
+        )
+
+        spotlightOptionsMenu = SpotlightOptionsPanel(
+            onDimOpacityChanged: { [weak self] opacity in
+                self?.onSpotlightDimOpacityChanged?(opacity)
+            },
+            onBlurRadiusChanged: { [weak self] radius in
+                self?.onSpotlightBlurRadiusChanged?(radius)
+            },
+            onSoftnessChanged: { [weak self] softness in
+                self?.onSpotlightSoftnessChanged?(softness)
+            },
+            onRegionChanged: { [weak self] region in
+                self?.onSpotlightRegionChanged?(region)
+            },
+            onEditingEnded: { [weak self] in
+                self?.onSpotlightOptionsEditingEnded?()
             }
         )
 
@@ -4118,6 +4905,7 @@ final class ToolbarPillView: NSView {
             let btn = ToolHoverButton(frame: CGRect(x: x, y: btnY, width: btnSz, height: btnSz))
             btn.bezelStyle = .regularSquare
             btn.isBordered = false
+            btn.title = ""
             let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
             btn.image = NSImage(systemSymbolName: tool.sfSymbol, accessibilityDescription: tool.sfSymbol)?
                             .withSymbolConfiguration(cfg)
@@ -4155,26 +4943,23 @@ final class ToolbarPillView: NSView {
         addSubview(swatch)
         colorSwatchButton = swatch
 
-        for (index, technique) in SpotlightTechnique.allCases.enumerated() {
-            let btn = NSButton(frame: CGRect(x: 0, y: btnY, width: btnSz, height: btnSz))
-            btn.bezelStyle = .regularSquare
-            btn.isBordered = false
-            let cfg = NSImage.SymbolConfiguration(pointSize: technique.menuSymbolPointSize, weight: .medium)
-            btn.image = NSImage(
-                systemSymbolName: technique.menuSymbol,
-                accessibilityDescription: technique.accessibilityLabel
-            )?.withSymbolConfiguration(cfg)
-            btn.imageScaling = .scaleProportionallyDown
-            btn.wantsLayer = true
-            btn.layer?.cornerRadius = DesignTokens.Radius.md
-            btn.tag = index
-            btn.target = self
-            btn.action = #selector(techniqueTapped(_:))
-            btn.toolTip = technique.accessibilityLabel
-            btn.isHidden = true
-            addSubview(btn)
-            techniqueButtons[technique] = btn
-        }
+        let optionsBtn = NSButton(frame: CGRect(x: 0, y: btnY, width: btnSz, height: btnSz))
+        optionsBtn.bezelStyle = .regularSquare
+        optionsBtn.isBordered = false
+        let optionsCfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        optionsBtn.image = NSImage(
+            systemSymbolName: "slider.horizontal.3",
+            accessibilityDescription: "Spotlight options"
+        )?.withSymbolConfiguration(optionsCfg)
+        optionsBtn.imageScaling = .scaleProportionallyDown
+        optionsBtn.wantsLayer = true
+        optionsBtn.layer?.cornerRadius = DesignTokens.Radius.md
+        optionsBtn.target = self
+        optionsBtn.action = #selector(spotlightOptionsTapped)
+        optionsBtn.toolTip = "Spotlight options"
+        optionsBtn.isHidden = true
+        addSubview(optionsBtn)
+        spotlightOptionsButton = optionsBtn
 
         if showsCopyButton {
             let trailing = makeSeparator(at: 0, height: h)
@@ -4209,7 +4994,19 @@ final class ToolbarPillView: NSView {
         updateTrackingAreas()
     }
 
-    private func layoutAccessoryControls() {
+    override func layout() {
+        super.layout()
+        backgroundEffect?.frame = bounds
+        applyPillCornerRadius(to: backgroundEffect?.layer)
+    }
+
+    private func applyPillCornerRadius(to layer: CALayer?) {
+        layer?.cornerRadius = pillCornerRadius
+        layer?.cornerCurve = .continuous
+        layer?.masksToBounds = true
+    }
+
+    private func layoutAccessoryControls(animated: Bool = false) {
         let h = pillHeight
         let btnSz = toolButtonSize
         let btnY = (h - btnSz) / 2
@@ -4218,18 +5015,12 @@ final class ToolbarPillView: NSView {
         accessorySeparator.frame.origin.x = x
         x += 9
 
-        let showTechniques = showsSpotlightTechniquePicker
-        colorSwatchButton.isHidden = showTechniques
-        for (technique, btn) in techniqueButtons {
-            btn.isHidden = !showTechniques
-            if showTechniques {
-                btn.frame.origin = CGPoint(x: x, y: btnY)
-                x += btnSz + 2
-            }
-            _ = technique
-        }
+        let showSpotlightAccessory = showsSpotlightAccessoryControls
 
-        if !showTechniques {
+        if showSpotlightAccessory {
+            spotlightOptionsButton.frame.origin = CGPoint(x: x, y: btnY)
+            x += btnSz + 2
+        } else {
             colorSwatchButton.frame.origin = CGPoint(x: x, y: btnY)
             x += btnSz + 2
         }
@@ -4252,13 +5043,77 @@ final class ToolbarPillView: NSView {
 
         let oldWidth = bounds.width
         let newWidth = x
-        setFrameSize(NSSize(width: newWidth, height: h))
-        if oldWidth > 0, oldWidth != newWidth {
-            // Keep the pill centered as its accessory width changes.
-            frame.origin.x += ((oldWidth - newWidth) / 2).rounded()
-            if let dragBounds {
-                frame.origin.x = min(max(frame.origin.x, dragBounds.minX), dragBounds.maxX - newWidth)
+        let shouldAnimate = animated && oldWidth > 0 && oldWidth != newWidth && !isAnimatingAccessoryLayout
+
+        if shouldAnimate {
+            let expanding = newWidth > oldWidth
+            applyAccessoryVisibility(showSpotlight: showSpotlightAccessory, deferSpotlightHide: !expanding)
+
+            isAnimatingAccessoryLayout = true
+            layer?.cornerRadius = pillCornerRadius
+            layer?.cornerCurve = .continuous
+            layer?.masksToBounds = true
+
+            var targetOrigin = NSPoint(x: frame.origin.x, y: frame.origin.y)
+            if let dragBounds, targetOrigin.x + newWidth > dragBounds.maxX {
+                targetOrigin.x = dragBounds.maxX - newWidth
             }
+            let targetFrame = NSRect(origin: targetOrigin, size: NSSize(width: newWidth, height: h))
+
+            let accessoryViews: [NSView] = [spotlightOptionsButton]
+            if expanding {
+                accessoryViews.forEach { $0.alphaValue = 0 }
+            }
+
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = expanding ? 0.24 : 0.2
+                ctx.timingFunction = CAMediaTimingFunction(name: expanding ? .easeOut : .easeInEaseOut)
+                self.animator().frame = targetFrame
+                if expanding {
+                    accessoryViews.forEach { $0.animator().alphaValue = 1 }
+                }
+            }, completionHandler: { [weak self] in
+                guard let self else { return }
+                self.isAnimatingAccessoryLayout = false
+                self.layer?.masksToBounds = false
+                if !expanding {
+                    self.applyAccessoryVisibility(
+                        showSpotlight: self.showsSpotlightAccessoryControls,
+                        deferSpotlightHide: false
+                    )
+                }
+                accessoryViews.forEach { $0.alphaValue = 1 }
+                self.layout()
+                self.layoutAccessoryControls(animated: false)
+            })
+        } else {
+            applyAccessoryVisibility(showSpotlight: showSpotlightAccessory, deferSpotlightHide: false)
+            setFrameSize(NSSize(width: newWidth, height: h))
+            if oldWidth > 0, oldWidth != newWidth {
+                clampAccessoryFrameToDragBounds()
+            }
+        }
+    }
+
+    private func applyAccessoryVisibility(showSpotlight: Bool, deferSpotlightHide: Bool = false) {
+        if showSpotlight {
+            colorSwatchButton.isHidden = true
+            spotlightOptionsButton.isHidden = false
+        } else if deferSpotlightHide {
+            colorSwatchButton.isHidden = true
+        } else {
+            colorSwatchButton.isHidden = false
+            spotlightOptionsButton.isHidden = true
+        }
+    }
+
+    private func clampAccessoryFrameToDragBounds() {
+        guard let dragBounds else { return }
+        if frame.maxX > dragBounds.maxX {
+            frame.origin.x = dragBounds.maxX - bounds.width
+        }
+        if frame.minX < dragBounds.minX {
+            frame.origin.x = dragBounds.minX
         }
     }
 
@@ -4275,6 +5130,7 @@ final class ToolbarPillView: NSView {
         tooltipPanel.hide()
         colorGridMenu.hide()
         customColorPicker.hide()
+        spotlightOptionsMenu.hide()
         let tools = availableTools
         guard sender.tag < tools.count else { return }
         let tool = tools[sender.tag]
@@ -4342,13 +5198,35 @@ final class ToolbarPillView: NSView {
         }
     }
 
-    @objc private func techniqueTapped(_ sender: NSButton) {
-        let techniques = SpotlightTechnique.allCases
-        guard sender.tag < techniques.count else { return }
-        let technique = techniques[sender.tag]
-        selectedSpotlightTechnique = technique
-        onSpotlightTechniqueSelected?(technique)
+    @objc private func spotlightOptionsTapped() {
+        drawStyleMenu.hide()
+        arrowStyleMenu.hide()
+        colorGridMenu.hide()
+        customColorPicker.hide()
+
+        guard let win = window else { return }
+        let btnRect = spotlightOptionsButton.convert(spotlightOptionsButton.bounds, to: nil)
+        let screenRect = win.convertToScreen(btnRect)
+
+        if spotlightOptionsMenu.isVisible {
+            spotlightOptionsMenu.hide()
+        } else {
+            onSpotlightOptionsWillShow?()
+            spotlightOptionsMenu.show(
+                aboveScreenRect: screenRect,
+                dimOpacity: selectedSpotlightDimOpacity,
+                blurRadius: selectedSpotlightBlurRadius,
+                softness: selectedSpotlightSoftness,
+                region: spotlightOptionsRegion,
+                affectsAllSpotlights: spotlightAffectsAllInstances
+            )
+        }
     }
+
+    /// Region shown in the options panel; set by the host before opening.
+    var spotlightOptionsRegion: CGRect = .zero
+    var spotlightAffectsAllInstances: Bool = false
+    var onSpotlightOptionsWillShow: (() -> Void)?
 
     private func showCustomColorPicker() {
         guard let win = window else { return }
@@ -4382,10 +5260,10 @@ final class ToolbarPillView: NSView {
         colorSwatchButton.color = selectedColor
         colorSwatchButton.needsDisplay = true
 
-        for (technique, btn) in techniqueButtons {
-            let on = technique == selectedSpotlightTechnique
-            btn.layer?.backgroundColor = on ? active.withAlphaComponent(0.2).cgColor : .clear
-            btn.contentTintColor = on ? active : .labelColor
+        if let spotlightOptionsButton {
+            let on = spotlightOptionsMenu?.isVisible == true
+            spotlightOptionsButton.layer?.backgroundColor = on ? active.withAlphaComponent(0.2).cgColor : .clear
+            spotlightOptionsButton.contentTintColor = on ? active : .labelColor
         }
 
         if selectedTool != .draw {
@@ -4394,10 +5272,42 @@ final class ToolbarPillView: NSView {
         if selectedTool != .arrow {
             arrowStyleMenu?.hide()
         }
-        if showsSpotlightTechniquePicker {
+        if showsSpotlightAccessoryControls {
             colorGridMenu?.hide()
             customColorPicker?.hide()
+        } else {
+            spotlightOptionsMenu?.hide()
         }
+    }
+
+    func syncSpotlightOptionsPanelRegion(_ region: CGRect) {
+        guard spotlightOptionsMenu.isVisible else { return }
+        spotlightOptionsRegion = region
+        spotlightOptionsMenu.updateRegion(region)
+    }
+
+    func syncSpotlightOptionsPanel(
+        dimOpacity: CGFloat,
+        blurRadius: CGFloat,
+        softness: CGFloat,
+        region: CGRect,
+        affectsAllSpotlights: Bool? = nil
+    ) {
+        selectedSpotlightDimOpacity = AppSettings.snapSpotlightDimOpacity(dimOpacity)
+        selectedSpotlightBlurRadius = AppSettings.snapSpotlightBlurRadius(blurRadius)
+        selectedSpotlightSoftness = AppSettings.snapSpotlightSoftness(softness)
+        spotlightOptionsRegion = region
+        if let affectsAllSpotlights {
+            spotlightAffectsAllInstances = affectsAllSpotlights
+        }
+        guard spotlightOptionsMenu.isVisible else { return }
+        spotlightOptionsMenu.populate(
+            dimOpacity: dimOpacity,
+            blurRadius: blurRadius,
+            softness: softness,
+            region: region
+        )
+        spotlightOptionsMenu.setAffectsAllSpotlights(spotlightAffectsAllInstances)
     }
 
     // MARK: Proximity fade
@@ -5076,33 +5986,94 @@ final class AnnotationWindow: NSWindow {
         canvas.needsDisplay = true
     }
 
-    private func updateSpotlightTechniquePickerVisibility() {
-        let spotlightSelected: Bool = {
-            guard let idx = canvas.selectedIndex,
-                  canvas.annotations.indices.contains(idx),
-                  case .spotlight = canvas.annotations[idx].content else { return false }
-            return true
-        }()
-        pill.showsSpotlightTechniquePicker = canvas.selectedTool == .spotlight || spotlightSelected
-        if spotlightSelected,
-           let idx = canvas.selectedIndex,
-           case let .spotlight(_, technique) = canvas.annotations[idx].content {
-            pill.selectedSpotlightTechnique = technique
-            canvas.selectedSpotlightTechnique = technique
+    private func updateToolbarAccessoryControls() {
+        pill.showsSpotlightAccessoryControls = canvas.prefersSpotlightToolbarAccessory()
+        pill.spotlightAffectsAllInstances = canvas.appliesSpotlightEffectGlobally
+
+        if let settings = canvas.spotlightSettingsForEditing() {
+            pill.selectedSpotlightDimOpacity = AppSettings.snapSpotlightDimOpacity(settings.dimOpacity)
+            pill.selectedSpotlightBlurRadius = AppSettings.snapSpotlightBlurRadius(settings.blurRadius)
+            pill.selectedSpotlightSoftness = AppSettings.snapSpotlightSoftness(settings.softness)
+            pill.spotlightOptionsRegion = settings.region
+            canvas.selectedSpotlightDimOpacity = settings.dimOpacity
+            canvas.selectedSpotlightBlurRadius = settings.blurRadius
+            canvas.selectedSpotlightSoftness = settings.softness
+        } else if canvas.selectedTool == .spotlight {
+            pill.selectedSpotlightDimOpacity = canvas.selectedSpotlightDimOpacity
+            pill.selectedSpotlightBlurRadius = canvas.selectedSpotlightBlurRadius
+            pill.selectedSpotlightSoftness = canvas.selectedSpotlightSoftness
+        }
+
+        syncToolbarPreferencesFromSelection()
+    }
+
+    private func syncToolbarPreferencesFromSelection() {
+        guard canvas.selectedTool == .select,
+              let idx = canvas.selectedIndex,
+              canvas.annotations.indices.contains(idx) else { return }
+
+        switch canvas.annotations[idx].content {
+        case let .stroke(_, color, _, tool):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+            pill.selectedStrokeTool = tool
+            canvas.selectedStrokeTool = tool
+        case let .arrow(_, _, _, color, tipStyle, pathStyle, _):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+            pill.selectedArrowTipStyle = tipStyle
+            canvas.selectedArrowTipStyle = tipStyle
+            pill.selectedArrowPathStyle = pathStyle
+            canvas.selectedArrowPathStyle = pathStyle
+        case let .rect(_, color):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+        case let .text(_, _, color, _):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+        case let .emoji(_, _, _, color):
+            pill.selectedColor = color
+            canvas.selectedColor = color
+        case .spotlight, .zoom, .crop:
+            break
+        }
+    }
+
+    private func syncSpotlightOptionsPanelFromCanvas() {
+        let affectsAll = canvas.appliesSpotlightEffectGlobally
+        if let settings = canvas.spotlightSettingsForEditing() {
+            pill.syncSpotlightOptionsPanel(
+                dimOpacity: settings.dimOpacity,
+                blurRadius: settings.blurRadius,
+                softness: settings.softness,
+                region: settings.region,
+                affectsAllSpotlights: affectsAll
+            )
+        } else {
+            pill.syncSpotlightOptionsPanel(
+                dimOpacity: canvas.selectedSpotlightDimOpacity,
+                blurRadius: canvas.selectedSpotlightBlurRadius,
+                softness: canvas.selectedSpotlightSoftness,
+                region: pill.spotlightOptionsRegion,
+                affectsAllSpotlights: affectsAll
+            )
         }
     }
 
     private func wire() {
         canvas.allowedTools = Set(AnnotationTool.screenshotTools)
-        pill.selectedTool = .draw
+        canvas.selectedTool = .select
+        pill.selectedTool = .select
         pill.selectedColor = NSColor.annotationPalette[0]
-        pill.selectedSpotlightTechnique = canvas.selectedSpotlightTechnique
+        pill.selectedSpotlightDimOpacity = canvas.selectedSpotlightDimOpacity
+        pill.selectedSpotlightBlurRadius = canvas.selectedSpotlightBlurRadius
+        pill.selectedSpotlightSoftness = canvas.selectedSpotlightSoftness
         updateCanvasStageBackground()
 
         canvas.onToolChanged = { [weak self] tool in
             guard let self else { return }
             self.pill.selectedTool = tool
-            self.updateSpotlightTechniquePickerVisibility()
+            self.updateToolbarAccessoryControls()
         }
 
         canvas.onEscapeAction = { [weak self] in
@@ -5114,14 +6085,20 @@ final class AnnotationWindow: NSWindow {
         }
 
         canvas.onSelectionChanged = { [weak self] _ in
-            self?.updateSpotlightTechniquePickerVisibility()
+            self?.updateToolbarAccessoryControls()
+        }
+
+        canvas.onSelectionGeometryChanged = { [weak self] in
+            guard let self,
+                  let settings = self.canvas.spotlightSettingsForEditing() else { return }
+            self.pill.syncSpotlightOptionsPanelRegion(settings.region)
         }
 
         pill.onToolSelected = { [weak self] tool in
             guard let self else { return }
             canvas.selectedTool = tool
             pill.selectedTool = tool
-            updateSpotlightTechniquePickerVisibility()
+            updateToolbarAccessoryControls()
         }
 
         pill.onColorSelected = { [weak self] color in
@@ -5149,10 +6126,40 @@ final class AnnotationWindow: NSWindow {
             pill.selectedArrowPathStyle = style
         }
 
-        pill.onSpotlightTechniqueSelected = { [weak self] technique in
+        pill.onSpotlightDimOpacityChanged = { [weak self] opacity in
             guard let self else { return }
-            canvas.applySpotlightTechnique(technique)
-            pill.selectedSpotlightTechnique = technique
+            canvas.applySpotlightDimOpacity(opacity)
+            pill.selectedSpotlightDimOpacity = opacity
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightBlurRadiusChanged = { [weak self] radius in
+            guard let self else { return }
+            canvas.applySpotlightBlurRadius(radius)
+            pill.selectedSpotlightBlurRadius = radius
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightSoftnessChanged = { [weak self] softness in
+            guard let self else { return }
+            canvas.applySpotlightSoftness(softness)
+            pill.selectedSpotlightSoftness = softness
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightRegionChanged = { [weak self] region in
+            guard let self else { return }
+            canvas.applySpotlightRegion(region)
+            pill.spotlightOptionsRegion = region
+            canvas.needsDisplay = true
+        }
+
+        pill.onSpotlightOptionsWillShow = { [weak self] in
+            self?.syncSpotlightOptionsPanelFromCanvas()
+        }
+
+        pill.onSpotlightOptionsEditingEnded = { [weak self] in
+            self?.canvas.commitSpotlightEditUndo()
         }
 
         actionBar.onCopy = { [weak self] in

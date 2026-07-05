@@ -12,6 +12,7 @@ import AVFoundation
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var globalMonitor: Any?
+    private var localHotkeyMonitor: Any?
     private var recordingEscapeGlobalMonitor: Any?
     private var recordingEscapeLocalMonitor: Any?
     private var recordingElapsedSeconds = 0
@@ -23,7 +24,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "camera.aperture", accessibilityDescription: "Snipsnap")
+            button.image = NSImage(systemSymbolName: "rectangle.dashed.badge.record", accessibilityDescription: "Snipsnap")
         }
 
         rebuildMenu()
@@ -48,10 +49,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.stopRecordingEscapeMonitor()
             self.stopRecordingStatus()
-            RecordingEngine.shared.onCompositedPreviewFrame = nil
-            CameraPreviewWindow.hide()
             RecordingBackgroundPreviewWindow.hide()
-            CaptureBar.resetActiveCamera()
+            CaptureBar.resetMediaSettings()
             self.rebuildMenu()
 
             guard let url else { return }
@@ -77,10 +76,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.stopRecordingEscapeMonitor()
             self.stopRecordingStatus()
-            RecordingEngine.shared.onCompositedPreviewFrame = nil
-            CameraPreviewWindow.hide()
             RecordingBackgroundPreviewWindow.hide()
-            CaptureBar.resetActiveCamera()
+            CaptureBar.resetMediaSettings()
             self.rebuildMenu()
             let alert = NSAlert()
             alert.messageText = "Recording Failed"
@@ -93,26 +90,53 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         print("[Snipsnap] Accessibility trusted: \(trusted)")
 
         registerGlobalHotkeys()
-        print("[Snipsnap] Global monitor registered: \(globalMonitor != nil)")
+        print("[Snipsnap] Global monitor registered: \(globalMonitor != nil), local: \(localHotkeyMonitor != nil)")
     }
 
     private func registerGlobalHotkeys() {
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-            print("[Snipsnap] keyDown keyCode=\(event.keyCode) modifiers=\(modifiers)")
-            if event.keyCode == 19 && modifiers == [.command, .shift] {
-                print("[Snipsnap] ⌘⇧2 triggered")
-                self?.takeScreenshot()
-            }
-            if event.keyCode == 21 && modifiers == [.command, .shift] {
-                print("[Snipsnap] ⌘⇧4 triggered")
-                self?.toggleRecording()
-            }
-            if event.keyCode == 22 && modifiers == [.command] {
-                print("[Snipsnap] ⌘6 triggered")
-                CaptureBar.show()
-            }
+        if let old = globalMonitor {
+            NSEvent.removeMonitor(old)
+            globalMonitor = nil
         }
+        if let old = localHotkeyMonitor {
+            NSEvent.removeMonitor(old)
+            localHotkeyMonitor = nil
+        }
+
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.handleHotkey(event)
+        }
+        localHotkeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.handleHotkey(event) else { return event }
+            return nil
+        }
+    }
+
+    /// Returns true when a registered hotkey was handled (and the event should be consumed).
+    @discardableResult
+    private func handleHotkey(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let command = flags.contains(.command)
+        let shift = flags.contains(.shift)
+        let option = flags.contains(.option)
+        let control = flags.contains(.control)
+
+        if event.keyCode == 20, command, shift, !option, !control {
+            print("[Snipsnap] ⌘⇧3 triggered")
+            takeScreenshot()
+            return true
+        }
+        if event.keyCode == 21, command, shift, !option, !control {
+            print("[Snipsnap] ⌘⇧4 triggered")
+            toggleRecording()
+            return true
+        }
+        if event.keyCode == 22, command, !shift, !option, !control {
+            print("[Snipsnap] ⌘6 triggered")
+            CaptureBar.show()
+            return true
+        }
+        return false
     }
 
     private func requestAccessibilityPermissionIfNeeded() {
@@ -127,7 +151,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Accessibility Access Required"
         alert.informativeText = """
-            Snipsnap needs Accessibility access for global shortcuts (⌘⇧2).
+            Snipsnap needs Accessibility access for global shortcuts (⌘⇧3).
 
             The app path has been copied to your clipboard.
 
@@ -154,11 +178,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             if AXIsProcessTrusted() {
                 print("[Snipsnap] Accessibility granted — re-registering monitor")
-                if let old = self.globalMonitor {
-                    NSEvent.removeMonitor(old)
-                }
                 self.registerGlobalHotkeys()
-                print("[Snipsnap] Monitor re-registered: \(self.globalMonitor != nil)")
+                print("[Snipsnap] Monitor re-registered: global=\(self.globalMonitor != nil) local=\(self.localHotkeyMonitor != nil)")
             } else {
                 self.pollForAccessibilityGrant()
             }
@@ -170,6 +191,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let monitor = globalMonitor {
             NSEvent.removeMonitor(monitor)
             globalMonitor = nil
+        }
+        if let monitor = localHotkeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            localHotkeyMonitor = nil
         }
     }
 
@@ -225,7 +250,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let screenshotItem = NSMenuItem(title: "Take Screenshot", action: #selector(takeScreenshot), keyEquivalent: "")
+        let screenshotItem = NSMenuItem(title: "Snap Area", action: #selector(takeScreenshot), keyEquivalent: "3")
+        screenshotItem.keyEquivalentModifierMask = [.command, .shift]
         screenshotItem.target = self
         menu.addItem(screenshotItem)
 
@@ -240,7 +266,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else if RecordingEngine.shared.isStartingRecording {
             recItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         } else {
-            recItem = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "")
+            recItem = NSMenuItem(title: "Record Screen", action: #selector(toggleRecording), keyEquivalent: "4")
+            recItem.keyEquivalentModifierMask = [.command, .shift]
             recItem.target = self
         }
         menu.addItem(recItem)
@@ -262,7 +289,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 item.target = self
                 item.tag = index
-                item.image = entry.thumbnail.thumbnail(size: NSSize(width: 40, height: 40))
                 menu.addItem(item)
             }
         }
@@ -279,7 +305,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem(title: "Quit Snipsnap", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
-        statusItem.menu = menu
+        if RecordingEngine.shared.isRecording {
+            statusItem.menu = nil
+            configureRecordingStatusItemClick()
+        } else {
+            statusItem.button?.action = nil
+            statusItem.button?.target = nil
+            statusItem.menu = menu
+        }
+    }
+
+    /// Left-click stops recording; right-click opens the menu.
+    private func configureRecordingStatusItemClick() {
+        guard let button = statusItem.button else { return }
+        button.target = self
+        button.action = #selector(statusItemClicked(_:))
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        guard RecordingEngine.shared.isRecording else { return }
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            rebuildMenu()
+            statusItem.menu?.popUp(
+                positioning: nil,
+                at: NSPoint(x: 0, y: sender.bounds.height),
+                in: sender
+            )
+            statusItem.menu = nil
+            configureRecordingStatusItemClick()
+        } else {
+            stopRecording()
+        }
     }
 
     private func formattedRecordingTime(_ seconds: Int) -> String {
@@ -289,6 +346,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func startRecordingStatus() {
         recordingElapsedSeconds = 0
         statusItem.length = NSStatusItem.variableLength
+        configureRecordingStatusItemClick()
         updateRecordingStatusDisplay()
 
         let src = DispatchSource.makeTimerSource(queue: .main)
@@ -308,15 +366,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingElapsedSeconds = 0
         statusItem.length = NSStatusItem.squareLength
         if let button = statusItem.button {
+            button.action = nil
+            button.target = nil
             button.title = ""
-            button.image = NSImage(systemSymbolName: "camera.aperture", accessibilityDescription: "Snipsnap")
+            button.image = NSImage(systemSymbolName: "rectangle.dashed.badge.record", accessibilityDescription: "Snipsnap")
         }
     }
 
     private func updateRecordingStatusDisplay() {
         guard let button = statusItem.button else { return }
         let time = formattedRecordingTime(recordingElapsedSeconds)
-        button.image = NSImage(systemSymbolName: "record.circle.fill", accessibilityDescription: "Recording")
+        let stopCfg = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.systemRed]))
+        button.image = NSImage(systemSymbolName: "stop.fill", accessibilityDescription: "Stop recording")?
+            .withSymbolConfiguration(stopCfg)
         button.imagePosition = .imageLeading
         button.title = " \(time)"
         button.toolTip = "Recording — \(time). Click to stop."
@@ -358,10 +421,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
                     pasteboard.writeObjects([image])
-                    CaptureHistory.shared.add(.screenshot(image))
+                    let entry = CaptureHistory.shared.add(.screenshot(image))
                     self.rebuildMenu()
                     ToastWindow.show(image: image) {
-                        AnnotationWindow.show(image: image)
+                        AnnotationWindow.show(image: image, fileName: entry?.displayName, captureID: entry?.id)
                     }
                 }
             }

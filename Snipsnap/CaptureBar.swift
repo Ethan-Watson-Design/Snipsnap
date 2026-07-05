@@ -5,8 +5,19 @@
 
 import AppKit
 import AVFoundation
+import CoreImage
 import ScreenCaptureKit
-import UniformTypeIdentifiers
+
+// MARK: - CaptureBarStyle
+
+/// Thin wrapper over `DesignTokens` for Capture Bar chrome.
+private enum CaptureBarStyle {
+    static let hoverCornerRadius = DesignTokens.Radius.md
+    /// Slightly tighter than the 4pt grid so mode-button highlights stay compact.
+    static let hoverPadding: CGFloat = 6
+    static let hoverFill = DesignTokens.Color.panelHoverFill.ns
+    static let activeFill = DesignTokens.Color.panelActiveFill.ns
+}
 
 // MARK: - CaptureMode
 
@@ -35,12 +46,13 @@ private final class CaptureBarModeButton: NSControl {
     private let highlightLayer = CALayer()
     private let iconView = NSImageView()
     private let labelField = NSTextField(labelWithString: "")
+    private var isHovered = false
 
     init(mode: CaptureMode, sfSymbol: String, label: String) {
         self.mode = mode
         super.init(frame: .zero)
         wantsLayer = true
-        highlightLayer.cornerRadius = 8
+        highlightLayer.cornerRadius = CaptureBarStyle.hoverCornerRadius
         layer?.addSublayer(highlightLayer)
 
         let cfg = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
@@ -50,7 +62,7 @@ private final class CaptureBarModeButton: NSControl {
         iconView.contentTintColor = .labelColor
 
         labelField.stringValue = label
-        labelField.font = NSFont.systemFont(ofSize: 9.5, weight: .regular)
+        labelField.font = NSFont.snipsnap(.caption)
         labelField.alignment = .center
         labelField.textColor = .labelColor
         labelField.isBezeled = false
@@ -69,13 +81,33 @@ private final class CaptureBarModeButton: NSControl {
         addCursorRect(bounds, cursor: .pointingHand)
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateLook()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateLook()
+    }
+
     override func layout() {
         super.layout()
-        highlightLayer.frame = bounds.insetBy(dx: 4, dy: 6)
 
-        let padTop: CGFloat = 8
+        let padTop = DesignTokens.Spacing.sm
         let iconSide: CGFloat = 18
-        let gap: CGFloat = 4
+        let gap = DesignTokens.Spacing.xs
         let labelH: CGFloat = 12
 
         iconView.frame = NSRect(
@@ -85,11 +117,16 @@ private final class CaptureBarModeButton: NSControl {
             height: iconSide
         )
         labelField.frame = NSRect(
-            x: 4,
+            x: DesignTokens.Spacing.xs,
             y: iconView.frame.minY - gap - labelH,
-            width: bounds.width - 8,
+            width: bounds.width - DesignTokens.Spacing.sm,
             height: labelH
         )
+
+        let contentRect = iconView.frame.union(labelField.frame)
+        highlightLayer.frame = contentRect
+            .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
+            .intersection(bounds.insetBy(dx: 2, dy: 2))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -100,9 +137,13 @@ private final class CaptureBarModeButton: NSControl {
     }
 
     private func updateLook() {
-        highlightLayer.backgroundColor = isActiveMode
-            ? NSColor.black.withAlphaComponent(0.18).cgColor
-            : .clear
+        if isActiveMode {
+            highlightLayer.backgroundColor = CaptureBarStyle.activeFill.cgColor
+        } else if isHovered {
+            highlightLayer.backgroundColor = CaptureBarStyle.hoverFill.cgColor
+        } else {
+            highlightLayer.backgroundColor = .clear
+        }
     }
 }
 
@@ -128,7 +169,7 @@ private final class CaptureBarMediaButton: NSControl {
         wantsLayer = true
         toolTip = accessibilityLabel
 
-        highlightLayer.cornerRadius = 8
+        highlightLayer.cornerRadius = CaptureBarStyle.hoverCornerRadius
         layer?.addSublayer(highlightLayer)
 
         chevronView.imageScaling = .scaleProportionallyDown
@@ -186,11 +227,10 @@ private final class CaptureBarMediaButton: NSControl {
             height: iconSide
         )
 
-        let highlightPad: CGFloat = 3
         let contentRect = iconView.frame.union(chevronView.frame)
         highlightLayer.frame = contentRect
-            .insetBy(dx: -highlightPad, dy: -highlightPad)
-            .intersection(bounds.insetBy(dx: 1, dy: 1))
+            .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
+            .intersection(bounds.insetBy(dx: 2, dy: 2))
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -216,11 +256,63 @@ private final class CaptureBarMediaButton: NSControl {
 
     private func updateHighlight() {
         if isMediaActive {
-            highlightLayer.backgroundColor = NSColor.black.withAlphaComponent(0.16).cgColor
+            highlightLayer.backgroundColor = CaptureBarStyle.activeFill.cgColor
         } else if isHovered {
-            highlightLayer.backgroundColor = NSColor.black.withAlphaComponent(0.08).cgColor
+            highlightLayer.backgroundColor = CaptureBarStyle.hoverFill.cgColor
         } else {
             highlightLayer.backgroundColor = .clear
+        }
+    }
+}
+
+// MARK: - CaptureBarPrimaryButton
+
+private final class CaptureBarPrimaryButton: NSButton {
+    private var isHovered = false
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateHoverLook()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateHoverLook()
+    }
+
+    override var isEnabled: Bool {
+        didSet { updateHoverLook() }
+    }
+
+    override func layout() {
+        super.layout()
+        updateHoverLook()
+    }
+
+    private func updateHoverLook() {
+        guard wantsLayer else { return }
+        if !isEnabled {
+            layer?.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.45).cgColor
+        } else if isHovered {
+            layer?.backgroundColor = NSColor.systemBlue.blended(withFraction: 0.12, of: .white)?.cgColor
+                ?? NSColor.systemBlue.cgColor
+        } else {
+            layer?.backgroundColor = NSColor.systemBlue.cgColor
         }
     }
 }
@@ -228,7 +320,7 @@ private final class CaptureBarMediaButton: NSControl {
 // MARK: - CaptureBarWindowPicker
 
 private final class CaptureBarWindowPickerCell: NSButtonCell {
-    private let padding = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 12)
+    private let padding = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
 
     private func padded(_ rect: NSRect) -> NSRect {
         NSRect(
@@ -250,6 +342,8 @@ private final class CaptureBarWindowPickerCell: NSButtonCell {
 
 /// Full-width picker shown above the capture bar when recording a window.
 private final class CaptureBarWindowPicker: NSButton {
+    private var isHovered = false
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         let pickerCell = CaptureBarWindowPickerCell(textCell: "")
@@ -258,42 +352,61 @@ private final class CaptureBarWindowPicker: NSButton {
         title = "Select a window…"
         imagePosition = .imageRight
         image = NSImage(systemSymbolName: "chevron.up", accessibilityDescription: "Choose window")
-        font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        font = NSFont.snipsnap(.body)
         alignment = .left
         isBordered = false
         wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        layer?.cornerRadius = CaptureBarStyle.hoverCornerRadius
         contentTintColor = .labelColor
         lineBreakMode = .byTruncatingTail
+        updateHoverLook()
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateHoverLook()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateHoverLook()
+    }
+
+    private func updateHoverLook() {
+        if isHovered {
+            layer?.backgroundColor = CaptureBarStyle.hoverFill.cgColor
+        } else {
+            layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        }
+    }
 }
 
 // MARK: - CaptureMediaDevices
 
 private enum CaptureMediaDevices {
-    static func videoDevices() -> [AVCaptureDevice] {
-        AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external],
-            mediaType: .video,
-            position: .unspecified
-        ).devices
-    }
-
     static func audioInputDevices() -> [AVCaptureDevice] {
         AVCaptureDevice.DiscoverySession(
             deviceTypes: [.microphone, .external],
             mediaType: .audio,
             position: .unspecified
         ).devices
-    }
-
-    static func defaultVideoDeviceID() -> String? {
-        let preferred = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-            ?? AVCaptureDevice.default(for: .video)
-        return preferred?.uniqueID ?? videoDevices().first?.uniqueID
     }
 
     static func localizedName(for device: AVCaptureDevice) -> String {
@@ -319,8 +432,6 @@ final class CaptureBar: NSPanel {
 
     private var modeButtons: [(CaptureMode, CaptureBarModeButton)] = []
     private weak var captureButton: NSButton?
-    private weak var cameraButton: CaptureBarMediaButton?
-    private weak var backgroundButton: CaptureBarMediaButton?
     private weak var systemAudioButton: CaptureBarMediaButton?
     private weak var micButton: CaptureBarMediaButton?
     private weak var optionsMediaSeparator: NSBox?
@@ -330,10 +441,10 @@ final class CaptureBar: NSPanel {
     private let barHeight: CGFloat = 64
     private let pickerRowHeight: CGFloat = 44
     private let pickerGap: CGFloat = 6
-    private let barWidth: CGFloat
     private weak var barEffectView: NSVisualEffectView?
     private weak var optionsRow: NSVisualEffectView?
     private weak var windowPickerButton: CaptureBarWindowPicker?
+    private weak var rootView: NSView?
 
     private var recordableWindows: [SCWindow] = []
     private var selectedRecordWindowID: CGWindowID?
@@ -356,17 +467,9 @@ final class CaptureBar: NSPanel {
         selectedMode == .screenshotRegion || selectedMode == .recordRegion
     }
 
-    /// Selected camera device ID; nil means camera is off.
-    private var selectedCameraID: String? = CaptureMediaDevices.defaultVideoDeviceID()
-    private var cameraStyle: CameraPreviewStyle = .square
-    private var cameraBackground: CameraBackgroundStyle = .none
-    private var recordingBackground: RecordingBackgroundStyle = .none
-    /// Selected mic device ID; nil means mic is off.
     private var selectedMicID: String? = nil
     private var systemAudioEnabled = false
 
-    /// Legacy computed property — true when a camera device is selected.
-    var cameraEnabled: Bool { selectedCameraID != nil }
     var micEnabled: Bool { selectedMicID != nil }
 
     // MARK: - Entry Points
@@ -386,20 +489,16 @@ final class CaptureBar: NSPanel {
 
     static func dismiss() {
         RegionSelector.hide()
-        dismissForRecording(hideCameraOverlay: true)
+        dismissForRecording()
     }
 
-    /// Hides the capture bar when starting a recording. Keeps the camera overlay visible
-    /// so ScreenCaptureKit can include it in full-screen recordings.
-    static func dismissForRecording(hideCameraOverlay: Bool = false) {
+    /// Hides the capture bar when starting a recording.
+    static func dismissForRecording() {
         let dismiss = {
             isPresented = false
             guard let bar = instance else { return }
             bar.stopEscapeMonitor()
             RecordingBackgroundPreviewWindow.hide()
-            if hideCameraOverlay {
-                CameraPreviewWindow.hide()
-            }
             bar.orderOut(nil)
         }
         if Thread.isMainThread {
@@ -412,20 +511,15 @@ final class CaptureBar: NSPanel {
     }
 
     /// Restores default media settings after a recording ends.
-    static func resetActiveCamera() {
+    static func resetMediaSettings() {
         DispatchQueue.main.async {
             guard let bar = instance else { return }
-            bar.selectedCameraID = CaptureMediaDevices.defaultVideoDeviceID()
-            bar.cameraStyle = .square
-            bar.cameraBackground = .none
-            bar.recordingBackground = .none
             bar.selectedMicID = nil
             bar.systemAudioEnabled = false
             bar.updateMediaButtonAppearances()
             RecordingBackgroundPreviewWindow.hide()
-            CameraPreviewWindow.hide()
-            if isPresented, bar.selectedMode.isRecording {
-                bar.applyRecordingPreview()
+            if isPresented, bar.showsWindowPicker || bar.selectedMode.isRecording {
+                bar.applyCapturePreview()
             }
         }
     }
@@ -439,9 +533,6 @@ final class CaptureBar: NSPanel {
     // MARK: - Init
 
     private init() {
-        let layout = CaptureBar.computeBarLayout()
-        barWidth = layout.totalWidth
-
         super.init(
             contentRect: .zero,
             styleMask: [.borderless, .nonactivatingPanel],
@@ -471,25 +562,28 @@ final class CaptureBar: NSPanel {
     }
 
     private static func computeBarLayout() -> BarLayout {
-        let hPad: CGFloat = 12
+        let hPad: CGFloat = 14
         let btnW: CGFloat = 58
-        let sepPad: CGFloat = 6
+        let sepPad: CGFloat = 8
         let sepW: CGFloat = 1
         let captureW: CGFloat = 82
 
         let allButtonCount = 6
         let separatorCount = 2
         let totalW = hPad
-                   + CGFloat(allButtonCount) * btnW
-                   + CGFloat(separatorCount) * (sepW + sepPad * 2)
-                   + captureW
-                   + hPad
+            + CGFloat(allButtonCount) * btnW
+            + CGFloat(separatorCount) * (sepW + sepPad * 2)
+            + captureW + hPad
         return BarLayout(totalWidth: totalW, horizontalPad: hPad)
+    }
+
+    private var barWidth: CGFloat {
+        Self.computeBarLayout().totalWidth
     }
 
     private static let mediaToggleW: CGFloat = 32
     private static let mediaToggleGap: CGFloat = 4
-    private static let mediaControlCount = 4
+    private static let mediaControlCount = 2
 
     private static var mediaControlsWidth: CGFloat {
         let count = CGFloat(mediaControlCount)
@@ -501,9 +595,8 @@ final class CaptureBar: NSPanel {
         let btnW:       CGFloat = 58
         let btnH:       CGFloat = 48
         let hPad = Self.computeBarLayout().horizontalPad
-        let captureW:   CGFloat = 82
         let captureH:   CGFloat = 30
-        let sepPad:     CGFloat = 6
+        let sepPad:     CGFloat = 8
         let sepW:       CGFloat = 1
         let toggleW:    CGFloat = Self.mediaToggleW
         let toggleGap:  CGFloat = Self.mediaToggleGap
@@ -525,13 +618,14 @@ final class CaptureBar: NSPanel {
 
         let root = NSView(frame: NSRect(x: 0, y: 0, width: totalW, height: barH))
         contentView = root
+        rootView = root
 
         let vfx = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: totalW, height: barH))
         vfx.material = .menu
         vfx.blendingMode = .behindWindow
         vfx.state = .active
         vfx.wantsLayer = true
-        vfx.layer?.cornerRadius = 12
+        vfx.layer?.cornerRadius = DesignTokens.Radius.lg
         vfx.layer?.masksToBounds = true
         root.addSubview(vfx)
         barEffectView = vfx
@@ -546,7 +640,7 @@ final class CaptureBar: NSPanel {
         optionsRowView.blendingMode = .behindWindow
         optionsRowView.state = .active
         optionsRowView.wantsLayer = true
-        optionsRowView.layer?.cornerRadius = 10
+        optionsRowView.layer?.cornerRadius = DesignTokens.Radius.lg
         optionsRowView.layer?.masksToBounds = true
         optionsRowView.isHidden = true
         root.addSubview(optionsRowView)
@@ -566,34 +660,6 @@ final class CaptureBar: NSPanel {
 
         let mediaBtnY: CGFloat = (pickerRowHeight - 36) / 2
         var mediaX = totalW - hPad - Self.mediaControlsWidth
-
-        // Camera popup
-        let camBtn = CaptureBarMediaButton(
-            baseSymbol: "video",
-            activeSymbol: "video.fill",
-            inactiveSymbol: "video",
-            accessibilityLabel: "Camera"
-        )
-        camBtn.frame = CGRect(x: mediaX, y: mediaBtnY, width: toggleW, height: 36)
-        camBtn.target = self
-        camBtn.action = #selector(cameraMenuClicked(_:))
-        optionsRowView.addSubview(camBtn)
-        cameraButton = camBtn
-        mediaX += toggleW + toggleGap
-
-        // Recording background popup
-        let bgBtn = CaptureBarMediaButton(
-            baseSymbol: "photo.on.rectangle.angled",
-            activeSymbol: "photo.on.rectangle.angled",
-            inactiveSymbol: "photo.on.rectangle",
-            accessibilityLabel: "Background"
-        )
-        bgBtn.frame = CGRect(x: mediaX, y: mediaBtnY, width: toggleW, height: 36)
-        bgBtn.target = self
-        bgBtn.action = #selector(backgroundMenuClicked(_:))
-        optionsRowView.addSubview(bgBtn)
-        backgroundButton = bgBtn
-        mediaX += toggleW + toggleGap
 
         // System audio popup
         let audioBtn = CaptureBarMediaButton(
@@ -630,7 +696,7 @@ final class CaptureBar: NSPanel {
         setContentSize(NSSize(width: totalW, height: barH))
 
         var x = hPad
-        let modeBtnY: CGFloat = 8
+        let modeBtnY: CGFloat = (barH - btnH) / 2
 
         for group in groups {
             for spec in group {
@@ -643,23 +709,18 @@ final class CaptureBar: NSPanel {
                 x += btnW
             }
             x += sepPad
-            let sep = NSBox(frame: CGRect(x: x, y: 12, width: sepW, height: barH - 24))
+            let sepInset: CGFloat = 14
+            let sep = NSBox(frame: CGRect(x: x, y: sepInset, width: sepW, height: barH - sepInset * 2))
             sep.boxType = NSBox.BoxType.separator
             vfx.addSubview(sep)
             x += sepW + sepPad
         }
 
-        let capBtn = NSButton(frame: CGRect(
-            x: x,
-            y: (barH - captureH) / 2,
-            width: captureW,
-            height: captureH
-        ))
+        let capBtn = CaptureBarPrimaryButton(frame: .zero)
         capBtn.title = "Capture"
         capBtn.isBordered = false
-        capBtn.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
+        capBtn.font = NSFont.snipsnap(.bodyEmphasized)
         capBtn.wantsLayer = true
-        capBtn.layer?.backgroundColor = NSColor.systemBlue.cgColor
         capBtn.layer?.cornerRadius = captureH / 2
         capBtn.contentTintColor = NSColor.white
         capBtn.target = self
@@ -667,8 +728,27 @@ final class CaptureBar: NSPanel {
         vfx.addSubview(capBtn)
         captureButton = capBtn
 
+        layoutMainBar()
         updateMediaButtonAppearances()
         refreshSelection()
+    }
+
+    private func layoutMainBar() {
+        let barH = barHeight
+        let hPad = Self.computeBarLayout().horizontalPad
+        let captureW: CGFloat = 82
+        let captureH: CGFloat = 30
+        let totalW = barWidth
+
+        barEffectView?.frame = NSRect(x: 0, y: 0, width: totalW, height: barH)
+        rootView?.frame.size.width = totalW
+
+        captureButton?.frame = CGRect(
+            x: totalW - hPad - captureW,
+            y: (barH - captureH) / 2,
+            width: captureW,
+            height: captureH
+        )
     }
 
     // MARK: - Escape
@@ -733,9 +813,7 @@ final class CaptureBar: NSPanel {
         let micOn = micEnabled
         let micID = selectedMicID
         let sysAudio = systemAudioEnabled
-        let recBackground = recordingBackground
-        let camID = selectedCameraID
-        let camStyle = cameraStyle
+        let recBackground = RecordingBackgroundStyle.none
 
         switch mode {
         case .screenshotRegion:
@@ -755,7 +833,7 @@ final class CaptureBar: NSPanel {
                 await WindowSelector.activateWindow(windowID)
                 await MainActor.run {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        ScreenshotEngine.captureWindow(windowID) { img in
+                        ScreenshotEngine.captureWindow(windowID, background: recBackground) { img in
                             guard let img else { return }
                             CaptureBar.finishScreenshot(img)
                         }
@@ -780,16 +858,16 @@ final class CaptureBar: NSPanel {
                 await WindowSelector.activateWindow(windowID)
                 await MainActor.run {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        CaptureBar.wireRecordingPreviewForCapture()
-                        CaptureBar.executeRecording(
-                            captureTarget: .window(windowID),
-                            recordingBackground: recBackground,
-                            cameraDeviceID: camID,
-                            cameraStyle: camStyle,
-                            micEnabled: micOn,
-                            systemAudioEnabled: sysAudio,
-                            micDeviceID: micID
-                        )
+                        Task {
+                            await CaptureBar.prepareRecordingPreviewForCapture()
+                            CaptureBar.executeRecording(
+                                captureTarget: .window(windowID),
+                                recordingBackground: recBackground,
+                                micEnabled: micOn,
+                                systemAudioEnabled: sysAudio,
+                                micDeviceID: micID
+                            )
+                        }
                     }
                 }
             }
@@ -802,8 +880,6 @@ final class CaptureBar: NSPanel {
                 CaptureBar.executeRecording(
                     captureTarget: .region(rect),
                     recordingBackground: recBackground,
-                    cameraDeviceID: camID,
-                    cameraStyle: camStyle,
                     micEnabled: micOn,
                     systemAudioEnabled: sysAudio,
                     micDeviceID: micID
@@ -814,27 +890,24 @@ final class CaptureBar: NSPanel {
             RegionSelector.hide()
             CaptureBar.dismissForRecording()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                CaptureBar.wireRecordingPreviewForCapture()
-                CaptureBar.executeRecording(
-                    captureTarget: .fullScreen,
-                    recordingBackground: recBackground,
-                    cameraDeviceID: camID,
-                    cameraStyle: camStyle,
-                    micEnabled: micOn,
-                    systemAudioEnabled: sysAudio,
-                    micDeviceID: micID
-                )
+                Task {
+                    await CaptureBar.prepareRecordingPreviewForCapture()
+                    CaptureBar.executeRecording(
+                        captureTarget: .fullScreen,
+                        recordingBackground: recBackground,
+                        micEnabled: micOn,
+                        systemAudioEnabled: sysAudio,
+                        micDeviceID: micID
+                    )
+                }
             }
         }
     }
 
-    /// Hands live composited frames to the preview thumbnail while RecordingEngine owns capture.
-    private static func wireRecordingPreviewForCapture() {
+    /// Stops preview capture so RecordingEngine can capture the same window.
+    private static func prepareRecordingPreviewForCapture() async {
         guard RecordingBackgroundPreviewWindow.isVisible else { return }
-        RecordingBackgroundPreviewWindow.transitionToRecording()
-        RecordingEngine.shared.onCompositedPreviewFrame = { image in
-            RecordingBackgroundPreviewWindow.updateFrame(image)
-        }
+        await RecordingBackgroundPreviewWindow.transitionToRecording()
     }
 
     // MARK: - Capture Execution
@@ -842,131 +915,31 @@ final class CaptureBar: NSPanel {
     private static func executeRecording(
         captureTarget: RecordingCaptureTarget,
         recordingBackground: RecordingBackgroundStyle = .none,
-        cameraDeviceID: String? = nil,
-        cameraStyle: CameraPreviewStyle = .square,
         micEnabled: Bool = false,
         systemAudioEnabled: Bool = false,
         micDeviceID: String? = nil
     ) {
-        let engineCamera = captureTarget != .fullScreen ? cameraDeviceID : nil
-        let usesOnScreenCamera = cameraDeviceID != nil && captureTarget == .fullScreen
-
-        if engineCamera != nil {
-            CameraPreviewWindow.hide()
-        } else if let cameraDeviceID {
-            let camBackground = instance?.cameraBackground ?? .none
-            CameraPreviewWindow.show(
-                style: cameraStyle,
-                deviceID: cameraDeviceID,
-                background: camBackground
-            )
-        }
-
-        let start = {
-            RecordingEngine.shared.startRecording(
-                captureTarget: captureTarget,
-                recordingBackground: recordingBackground,
-                cameraDeviceID: engineCamera,
-                cameraStyle: cameraStyle,
-                micEnabled: micEnabled,
-                systemAudioEnabled: systemAudioEnabled,
-                micDeviceID: micDeviceID
-            )
-        }
-
-        if usesOnScreenCamera {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                start()
-            }
-        } else {
-            start()
-        }
+        RecordingEngine.shared.startRecording(
+            captureTarget: captureTarget,
+            recordingBackground: recordingBackground,
+            micEnabled: micEnabled,
+            systemAudioEnabled: systemAudioEnabled,
+            micDeviceID: micDeviceID
+        )
     }
 
     private static func finishScreenshot(_ image: NSImage) {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects([image])
-        CaptureHistory.shared.add(.screenshot(image))
+        let entry = CaptureHistory.shared.add(.screenshot(image))
         (NSApp.delegate as? AppDelegate)?.rebuildMenu()
         ToastWindow.show(image: image) {
-            AnnotationWindow.show(image: image)
+            AnnotationWindow.show(image: image, fileName: entry?.displayName, captureID: entry?.id)
         }
     }
 
     // MARK: - Media Popup Menus
-
-    @objc private func cameraMenuClicked(_ sender: NSControl) {
-        let menu = NSMenu()
-
-        let noneItem = NSMenuItem(title: "None", action: #selector(selectCamera(_:)), keyEquivalent: "")
-        noneItem.target = self
-        noneItem.representedObject = nil as String?
-        noneItem.state = selectedCameraID == nil ? .on : .off
-        menu.addItem(noneItem)
-
-        let devices = CaptureMediaDevices.videoDevices()
-        if !devices.isEmpty {
-            menu.addItem(.separator())
-
-            for device in devices {
-                let item = NSMenuItem(
-                    title: CaptureMediaDevices.localizedName(for: device),
-                    action: #selector(selectCamera(_:)),
-                    keyEquivalent: ""
-                )
-                item.target = self
-                item.representedObject = device.uniqueID
-                item.state = selectedCameraID == device.uniqueID ? .on : .off
-                menu.addItem(item)
-            }
-
-            menu.addItem(.separator())
-
-            let squareItem = NSMenuItem(title: "Square", action: #selector(selectCameraStyle(_:)), keyEquivalent: "")
-            squareItem.target = self
-            squareItem.tag = 0
-            squareItem.state = cameraStyle == .square ? .on : .off
-            menu.addItem(squareItem)
-
-            let verticalItem = NSMenuItem(title: "Vertical Strip", action: #selector(selectCameraStyle(_:)), keyEquivalent: "")
-            verticalItem.target = self
-            verticalItem.tag = 1
-            verticalItem.state = cameraStyle == .vertical ? .on : .off
-            menu.addItem(verticalItem)
-
-            menu.addItem(.separator())
-
-            for style in [CameraBackgroundStyle.none, .blur] {
-                let item = NSMenuItem(title: style.menuTitle, action: #selector(selectCameraBackground(_:)), keyEquivalent: "")
-                item.target = self
-                item.tag = cameraBackgroundTag(for: style)
-                item.state = cameraBackground == style ? .on : .off
-                menu.addItem(item)
-            }
-        }
-
-        popMenu(menu, from: sender)
-    }
-
-    @objc private func backgroundMenuClicked(_ sender: NSControl) {
-        let menu = NSMenu()
-
-        for style in [RecordingBackgroundStyle.none, .warm, .cool, .midnight] {
-            let item = NSMenuItem(title: style.menuTitle, action: #selector(selectRecordingBackground(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = recordingBackgroundTag(for: style)
-            item.state = recordingBackground == style ? .on : .off
-            menu.addItem(item)
-        }
-
-        let customRecBg = NSMenuItem(title: "Custom Image…", action: #selector(selectCustomRecordingBackground(_:)), keyEquivalent: "")
-        customRecBg.target = self
-        if case .custom = recordingBackground { customRecBg.state = .on }
-        menu.addItem(customRecBg)
-
-        popMenu(menu, from: sender)
-    }
 
     @objc private func systemAudioMenuClicked(_ sender: NSControl) {
         let menu = NSMenu()
@@ -1014,76 +987,6 @@ final class CaptureBar: NSPanel {
         popMenu(menu, from: sender)
     }
 
-    @objc private func selectCamera(_ sender: NSMenuItem) {
-        selectedCameraID = sender.representedObject as? String
-        updateMediaButtonAppearances()
-        applyRecordingPreview()
-    }
-
-    @objc private func selectCameraStyle(_ sender: NSMenuItem) {
-        guard selectedCameraID != nil else { return }
-        cameraStyle = sender.tag == 1 ? .vertical : .square
-        applyRecordingPreview()
-    }
-
-    @objc private func selectCameraBackground(_ sender: NSMenuItem) {
-        guard selectedCameraID != nil else { return }
-        cameraBackground = cameraBackgroundStyle(for: sender.tag)
-        applyRecordingPreview()
-    }
-
-    @objc private func selectRecordingBackground(_ sender: NSMenuItem) {
-        recordingBackground = recordingBackgroundStyle(for: sender.tag)
-        updateMediaButtonAppearances()
-        applyRecordingPreview()
-    }
-
-    @objc private func selectCustomRecordingBackground(_ sender: NSMenuItem) {
-        pickImage { [weak self] path in
-            guard let self, let path else { return }
-            self.recordingBackground = .custom(path: path)
-            self.updateMediaButtonAppearances()
-            self.applyRecordingPreview()
-        }
-    }
-
-    private func cameraBackgroundTag(for style: CameraBackgroundStyle) -> Int {
-        style == .blur ? 1 : 0
-    }
-
-    private func cameraBackgroundStyle(for tag: Int) -> CameraBackgroundStyle {
-        tag == 1 ? .blur : .none
-    }
-
-    private func recordingBackgroundTag(for style: RecordingBackgroundStyle) -> Int {
-        switch style {
-        case .none: return 0
-        case .warm: return 1
-        case .cool: return 2
-        case .midnight: return 3
-        case .custom: return 4
-        }
-    }
-
-    private func recordingBackgroundStyle(for tag: Int) -> RecordingBackgroundStyle {
-        switch tag {
-        case 1: return .warm
-        case 2: return .cool
-        case 3: return .midnight
-        default: return .none
-        }
-    }
-
-    private func pickImage(completion: @escaping (String?) -> Void) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.begin { response in
-            completion(response == .OK ? panel.url?.path : nil)
-        }
-    }
-
     @objc private func selectSystemAudio(_ sender: NSMenuItem) {
         systemAudioEnabled = sender.tag == 1
         updateMediaButtonAppearances()
@@ -1096,7 +999,7 @@ final class CaptureBar: NSPanel {
 
     private func popMenu(_ menu: NSMenu, from button: NSView, above: Bool = false) {
         if above {
-            menu.font = NSFont.systemFont(ofSize: 13)
+            menu.font = NSFont.snipsnap(.body)
         }
         let y = above ? button.bounds.maxY : button.bounds.maxY + 2
         let loc = NSPoint(x: button.bounds.midX, y: y)
@@ -1138,10 +1041,14 @@ final class CaptureBar: NSPanel {
 
     @objc private func selectRecordWindow(_ sender: NSMenuItem) {
         guard let number = sender.representedObject as? NSNumber else { return }
-        selectedRecordWindowID = CGWindowID(number.uint32Value)
+        let windowID = CGWindowID(number.uint32Value)
+        selectedRecordWindowID = windowID
         updateWindowPickerTitle()
         updateCaptureButtonState()
-        applyRecordingPreview()
+        applyCapturePreview()
+        Task {
+            await WindowSelector.activateWindow(windowID)
+        }
     }
 
     private func loadRecordableWindows() {
@@ -1159,7 +1066,7 @@ final class CaptureBar: NSPanel {
                 }
                 self.updateWindowPickerTitle()
                 self.updateCaptureButtonState()
-                self.applyRecordingPreview()
+                self.applyCapturePreview()
             }
         }
     }
@@ -1182,16 +1089,18 @@ final class CaptureBar: NSPanel {
         let showMediaSeparator = showsWindowPicker && showsRecordingMediaControls
         optionsMediaSeparator?.isHidden = !showMediaSeparator
 
-        for button in [cameraButton, backgroundButton, systemAudioButton, micButton].compactMap({ $0 }) {
+        for button in [systemAudioButton, micButton].compactMap({ $0 }) {
             button.isHidden = !showsRecordingMediaControls
         }
 
+        layoutMainBar()
         layoutOptionsRow()
 
         let totalH = showsOptionsRow ? (barHeight + pickerGap + pickerRowHeight) : barHeight
         let newSize = NSSize(width: barWidth, height: totalH)
         if contentView?.frame.size != newSize {
             setContentSizeKeepingBottomFixed(newSize)
+            repositionOnScreen()
         }
 
         if showsWindowPicker {
@@ -1270,7 +1179,7 @@ final class CaptureBar: NSPanel {
             mediaX = (totalW - mediaW) / 2
         }
 
-        for button in [cameraButton, backgroundButton, systemAudioButton, micButton].compactMap({ $0 }) {
+        for button in [systemAudioButton, micButton].compactMap({ $0 }) {
             button.frame = CGRect(x: mediaX, y: mediaBtnY, width: toggleW, height: 36)
             mediaX += toggleW + toggleGap
         }
@@ -1283,31 +1192,23 @@ final class CaptureBar: NSPanel {
         )
     }
 
-    // MARK: - Recording Preview
+    // MARK: - Capture Preview
 
-    private func applyRecordingPreview() {
+    private func applyCapturePreview() {
         guard CaptureBar.isPresented, isVisible else {
             RecordingBackgroundPreviewWindow.hide()
             return
         }
 
-        guard selectedMode.isRecording else {
-            RecordingBackgroundPreviewWindow.hide()
-            return
-        }
-
         switch selectedMode {
-        case .recordWindow:
+        case .recordWindow, .screenshotWindow:
             guard selectedRecordWindowID != nil else {
                 RecordingBackgroundPreviewWindow.hide()
                 return
             }
         case .recordFullScreen:
             break
-        case .recordRegion:
-            RecordingBackgroundPreviewWindow.hide()
-            return
-        default:
+        case .recordRegion, .screenshotRegion, .screenshotFullScreen:
             RecordingBackgroundPreviewWindow.hide()
             return
         }
@@ -1315,16 +1216,12 @@ final class CaptureBar: NSPanel {
         let config = RecordingBackgroundPreviewWindow.Configuration(
             captureMode: selectedMode,
             windowID: selectedRecordWindowID,
-            background: recordingBackground,
-            cameraDeviceID: selectedCameraID,
-            cameraStyle: cameraStyle
+            background: .none
         )
         RecordingBackgroundPreviewWindow.showThumbnail(configuration: config)
     }
 
     private func updateMediaButtonAppearances() {
-        cameraButton?.isMediaActive = selectedCameraID != nil
-        backgroundButton?.isMediaActive = recordingBackground != .none
         systemAudioButton?.isMediaActive = systemAudioEnabled
         micButton?.isMediaActive = selectedMicID != nil
     }
@@ -1337,10 +1234,9 @@ final class CaptureBar: NSPanel {
         }
         captureButton?.title = selectedMode.isRecording ? "Record" : "Capture"
 
-        if selectedMode.isRecording {
-            applyRecordingPreview()
+        if showsWindowPicker || selectedMode.isRecording {
+            applyCapturePreview()
         } else {
-            CameraPreviewWindow.hide()
             RecordingBackgroundPreviewWindow.hide()
         }
 

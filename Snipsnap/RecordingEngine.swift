@@ -5,8 +5,6 @@
 //  Created by Ethan Watson on 6/27/26.
 //
 
-// NOTE: When cameraEnabled = true, NSCameraUsageDescription is also required.
-
 import ScreenCaptureKit
 @preconcurrency import AVFoundation
 import AppKit
@@ -41,16 +39,13 @@ enum RecordingBackgroundStyle: Equatable {
 }
 
 class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
-                       AVCaptureAudioDataOutputSampleBufferDelegate,
-                       AVCaptureVideoDataOutputSampleBufferDelegate {
+                       AVCaptureAudioDataOutputSampleBufferDelegate {
 
     static let shared = RecordingEngine()
 
     var onRecordingStarted: (() -> Void)?
     var onRecordingStopped: ((URL?) -> Void)?
     var onRecordingFailed: ((Error) -> Void)?
-    /// Called with composited frames when recording a window with a background.
-    var onCompositedPreviewFrame: ((CGImage) -> Void)?
 
     /// Whether a recording is currently active.
     private(set) var isRecording = false
@@ -63,9 +58,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     private var captureTarget: RecordingCaptureTarget = .fullScreen
     private var recordingBackground: RecordingBackgroundStyle = .none
     private var usesBackgroundComposite = false
-    private var cameraDeviceID: String?
-    private var cameraStyle: CameraPreviewStyle = .square
-    private var cameraEnabled: Bool { cameraDeviceID != nil }
 
     // MARK: - Private recording state
 
@@ -81,16 +73,7 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     private var micAnchorPTS: CMTime?
     private var sessionAnchorTime: CMTime = .invalid
 
-    // Camera compositing
-    private var cameraSession: AVCaptureSession?
-    private var cameraVideoOutput: AVCaptureVideoDataOutput?
-    private let cameraQueue = DispatchQueue(label: "com.snipsnap.cameraCapture", qos: .userInitiated)
-    private var latestCameraFrame: CVPixelBuffer?
-    private let cameraLock = NSLock()
     private lazy var ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    private lazy var blendWithMaskFilter = CIFilter(name: "CIBlendWithMask")
-    private lazy var sourceOverFilter = CIFilter(name: "CISourceOverCompositing")
-    private var cachedMask: (key: String, image: CIImage)?
 
     private var streamRunning = false
     private var outputURL: URL?
@@ -111,8 +94,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     func startRecording(
         captureTarget: RecordingCaptureTarget = .fullScreen,
         recordingBackground: RecordingBackgroundStyle = .none,
-        cameraDeviceID: String? = nil,
-        cameraStyle: CameraPreviewStyle = .square,
         micEnabled: Bool = false,
         systemAudioEnabled: Bool = false,
         micDeviceID: String? = nil
@@ -122,8 +103,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         isStartingRecording = true
         self.captureTarget = captureTarget
         self.recordingBackground = recordingBackground
-        self.cameraDeviceID = cameraDeviceID
-        self.cameraStyle = cameraStyle
         self.includeMic = micEnabled
         self.includeSystemAudio = systemAudioEnabled
         self.micDeviceID = micDeviceID
@@ -184,7 +163,7 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                     filter = SCContentFilter(desktopIndependentWindow: window)
                     streamW = Int(window.frame.width) * scale
                     streamH = Int(window.frame.height) * scale
-                    let needsCanvasLayout = recordingBackground != .none || cameraDeviceID != nil
+                    let needsCanvasLayout = recordingBackground != .none
                     if needsCanvasLayout {
                         outputW = 1920 * scale
                         outputH = 1080 * scale
@@ -338,47 +317,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                     }
                 }
 
-                // Camera compositing for window/region captures (full-screen uses the floating preview overlay).
-                if cameraEnabled {
-                    let camGranted = await Self.requestCameraAccess()
-                    if !camGranted {
-                        DispatchQueue.main.async {
-                            NSWorkspace.shared.open(
-                                URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera")!
-                            )
-                        }
-                    }
-                    if camGranted {
-                        let camSession = AVCaptureSession()
-                        camSession.sessionPreset = .medium
-
-                        let camDevice = cameraDeviceID.flatMap { AVCaptureDevice(uniqueID: $0) }
-                            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-                            ?? AVCaptureDevice.default(for: .video)
-                        if let camDevice,
-                           let camInput = try? AVCaptureDeviceInput(device: camDevice),
-                           camSession.canAddInput(camInput) {
-                            camSession.addInput(camInput)
-                        }
-
-                        let videoOut = AVCaptureVideoDataOutput()
-                        videoOut.videoSettings = [
-                            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
-                        ]
-                        videoOut.alwaysDiscardsLateVideoFrames = true
-                        videoOut.setSampleBufferDelegate(self, queue: cameraQueue)
-                        if camSession.canAddOutput(videoOut) {
-                            camSession.addOutput(videoOut)
-                        }
-
-                        self.cameraSession = camSession
-                        self.cameraVideoOutput = videoOut
-                        cameraQueue.async {
-                            camSession.startRunning()
-                        }
-                    }
-                }
-
                 // Begin writing, then start the screen stream.
                 writer.startWriting()
 
@@ -419,31 +357,9 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
 
             guard let screenPB = CMSampleBufferGetImageBuffer(buffer) else { return }
 
-            if cameraEnabled || usesBackgroundComposite {
-                var working = screenPB
-                if usesBackgroundComposite, let composited = compositeOntoRecordingBackground(screenPB) {
-                    working = composited
-                }
-                if cameraEnabled, let withCamera = compositeCamera(onto: working) {
-                    if let callback = onCompositedPreviewFrame {
-                        publishPreviewFrame(withCamera, callback: callback)
-                    }
-                    pixelBufferAdaptor?.append(withCamera, withPresentationTime: pts)
-                } else if usesBackgroundComposite, working !== screenPB {
-                    if let callback = onCompositedPreviewFrame {
-                        publishPreviewFrame(working, callback: callback)
-                    }
-                    pixelBufferAdaptor?.append(working, withPresentationTime: pts)
-                } else {
-                    if let callback = onCompositedPreviewFrame {
-                        publishPreviewFrame(screenPB, callback: callback)
-                    }
-                    vInput.append(buffer)
-                }
+            if usesBackgroundComposite, let composited = compositeOntoRecordingBackground(screenPB) {
+                pixelBufferAdaptor?.append(composited, withPresentationTime: pts)
             } else {
-                if let callback = onCompositedPreviewFrame {
-                    publishPreviewFrame(screenPB, callback: callback)
-                }
                 vInput.append(buffer)
             }
 
@@ -472,23 +388,13 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         let scale = CGFloat(recordingPixelScale)
         let canvasSize = RecordingBackgroundRenderer.canvasSize(for: scale)
         let windowImage = CIImage(cvPixelBuffer: windowBuffer)
-        let layoutCamera: CameraPreviewStyle? = cameraEnabled && cameraStyle == .vertical ? .vertical : nil
         let composited = RecordingBackgroundRenderer.composite(
             windowImage: windowImage,
             background: recordingBackground,
             canvasSize: canvasSize,
-            cameraStyle: layoutCamera,
             scale: scale
         )
         return renderToPixelBuffer(composited, width: Int(canvasSize.width), height: Int(canvasSize.height))
-    }
-
-    private func publishPreviewFrame(_ pixelBuffer: CVPixelBuffer, callback: @escaping (CGImage) -> Void) {
-        let image = CIImage(cvPixelBuffer: pixelBuffer)
-        guard let cgImage = ciContext.createCGImage(image, from: image.extent) else { return }
-        DispatchQueue.main.async {
-            callback(cgImage)
-        }
     }
 
     private func renderToPixelBuffer(_ image: CIImage, width: Int, height: Int) -> CVPixelBuffer? {
@@ -507,154 +413,15 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                                 kCVPixelFormatType_32BGRA, attrs as CFDictionary, &outBuffer)
         }
         guard let outBuffer else { return nil }
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        let finiteImage = image.clampedToExtent().cropped(to: bounds)
         ciContext.render(
-            image,
+            finiteImage,
             to: outBuffer,
-            bounds: CGRect(x: 0, y: 0, width: width, height: height),
+            bounds: bounds,
             colorSpace: CGColorSpaceCreateDeviceRGB()
         )
         return outBuffer
-    }
-
-    // MARK: - Camera compositing (legacy — camera overlay is captured via SCK)
-
-    /// Renders the latest camera frame into the screen buffer using the selected layout.
-    private func compositeCamera(onto screenBuffer: CVPixelBuffer) -> CVPixelBuffer? {
-        cameraLock.lock()
-        let cameraFrame = latestCameraFrame
-        cameraLock.unlock()
-        guard let cameraFrame else { return nil }
-
-        let screenW = CGFloat(CVPixelBufferGetWidth(screenBuffer))
-        let screenH = CGFloat(CVPixelBufferGetHeight(screenBuffer))
-        let scale   = CGFloat(recordingPixelScale)
-
-        let camW = CGFloat(CVPixelBufferGetWidth(cameraFrame))
-        let camH = CGFloat(CVPixelBufferGetHeight(cameraFrame))
-
-        let mirrorTx  = CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -camW, y: 0)
-        let ciCamera  = CIImage(cvPixelBuffer: cameraFrame).transformed(by: mirrorTx)
-        let ciScreen  = CIImage(cvPixelBuffer: screenBuffer)
-
-        let margin: CGFloat
-
-        switch cameraStyle {
-        case .square:
-            let side = 100.0 * scale
-            margin = 20.0 * scale
-            let camScale = side / min(camW, camH)
-            let scaledW = camW * camScale
-            let scaledH = camH * camScale
-            let cropRect = CGRect(
-                x: (scaledW - side) / 2,
-                y: (scaledH - side) / 2,
-                width: side,
-                height: side
-            )
-            let croppedCam = ciCamera
-                .transformed(by: CGAffineTransform(scaleX: camScale, y: camScale))
-                .cropped(to: cropRect)
-            let tx = screenW - side - margin - croppedCam.extent.minX
-            let ty = margin - croppedCam.extent.minY
-            let positioned = croppedCam.transformed(by: CGAffineTransform(translationX: tx, y: ty))
-            let mask = roundedRectMask(rect: CGRect(x: 0, y: 0, width: side, height: side),
-                                       cornerRadius: 12 * scale,
-                                       translatedTo: CGPoint(x: tx, y: ty))
-            return compositeMaskedCamera(positioned, mask: mask, over: ciScreen,
-                                         screenBuffer: screenBuffer, width: Int(screenW), height: Int(screenH))
-
-        case .vertical:
-            let strip = VerticalCameraStripLayout.metrics(screenWidth: screenW, screenHeight: screenH, scale: scale)
-            let stripW = strip.width
-            let stripH = strip.height
-            let camScale = max(stripW / camW, stripH / camH)
-            let scaledW = camW * camScale
-            let scaledH = camH * camScale
-            let cropRect = CGRect(
-                x: (scaledW - stripW) / 2,
-                y: (scaledH - stripH) / 2,
-                width: stripW,
-                height: stripH
-            )
-            let croppedCam = ciCamera
-                .transformed(by: CGAffineTransform(scaleX: camScale, y: camScale))
-                .cropped(to: cropRect)
-            let tx = strip.originX - croppedCam.extent.minX
-            let ty = strip.originY - croppedCam.extent.minY
-            let positioned = croppedCam.transformed(by: CGAffineTransform(translationX: tx, y: ty))
-            let mask = VerticalCameraStripLayout.roundedRectMask(
-                rect: CGRect(origin: .zero, size: CGSize(width: stripW, height: stripH)),
-                cornerRadius: strip.cornerRadius,
-                translatedTo: CGPoint(x: tx, y: ty)
-            )
-            return compositeMaskedCamera(positioned, mask: mask, over: ciScreen,
-                                         screenBuffer: screenBuffer, width: Int(screenW), height: Int(screenH))
-        }
-    }
-
-    private func roundedRectMask(rect: CGRect, cornerRadius: CGFloat, translatedTo origin: CGPoint) -> CIImage {
-        let cacheKey = "\(rect)-\(cornerRadius)-\(origin)"
-        if let cached = cachedMask, cached.key == cacheKey { return cached.image }
-
-        let extent = rect.offsetBy(dx: origin.x, dy: origin.y)
-        let w = Int(extent.width.rounded())
-        let h = Int(extent.height.rounded())
-        guard w > 0, h > 0,
-              let colorSpace = CGColorSpace(name: CGColorSpace.linearGray),
-              let ctx = CGContext(
-                data: nil,
-                width: w,
-                height: h,
-                bitsPerComponent: 8,
-                bytesPerRow: w,
-                space: colorSpace,
-                bitmapInfo: CGImageAlphaInfo.none.rawValue
-              ) else {
-            return CIImage(color: .white).cropped(to: extent)
-        }
-
-        ctx.setFillColor(gray: 0, alpha: 1)
-        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-        ctx.setFillColor(gray: 1, alpha: 1)
-        let path = CGPath(
-            roundedRect: CGRect(x: 0, y: 0, width: rect.width, height: rect.height),
-            cornerWidth: cornerRadius,
-            cornerHeight: cornerRadius,
-            transform: nil
-        )
-        ctx.addPath(path)
-        ctx.fillPath()
-
-        guard let cgImage = ctx.makeImage() else {
-            return CIImage(color: .white).cropped(to: extent)
-        }
-        let result = CIImage(cgImage: cgImage)
-            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
-            .cropped(to: extent)
-        cachedMask = (key: cacheKey, image: result)
-        return result
-    }
-
-    private func compositeMaskedCamera(
-        _ camera: CIImage,
-        mask: CIImage,
-        over screen: CIImage,
-        screenBuffer: CVPixelBuffer,
-        width: Int,
-        height: Int
-    ) -> CVPixelBuffer? {
-        guard let blendFilter = blendWithMaskFilter else { return nil }
-        blendFilter.setValue(camera, forKey: kCIInputImageKey)
-        blendFilter.setValue(CIImage(color: .clear), forKey: kCIInputBackgroundImageKey)
-        blendFilter.setValue(mask, forKey: kCIInputMaskImageKey)
-        guard let maskedCam = blendFilter.outputImage else { return nil }
-
-        guard let compositeFilter = sourceOverFilter else { return nil }
-        compositeFilter.setValue(maskedCam, forKey: kCIInputImageKey)
-        compositeFilter.setValue(screen, forKey: kCIInputBackgroundImageKey)
-        guard let composited = compositeFilter.outputImage else { return nil }
-
-        return renderToPixelBuffer(composited, width: width, height: height)
     }
 
     // MARK: - SCStreamDelegate
@@ -665,7 +432,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         guard isRecording else { return }
         isRecording = false
         sessionStarted = false
-        teardownCamera()
         audioCaptureSession?.stopRunning()
         audioCaptureSession = nil
         micAnchorPTS = nil
@@ -690,7 +456,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
                 streamRunning = false
                 try? await stream?.stopCapture()
             }
-            teardownCamera()
             audioCaptureSession?.stopRunning()
             audioCaptureSession = nil
             micAnchorPTS = nil
@@ -712,33 +477,15 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         }
     }
 
-    private func teardownCamera() {
-        cameraLock.lock()
-        latestCameraFrame = nil
-        cameraLock.unlock()
-        cameraVideoOutput = nil
-        cameraSession?.stopRunning()
-        cameraSession = nil
-    }
-
-    // MARK: - AVCapture delegates (audio + video)
+    // MARK: - AVCaptureAudioDataOutputSampleBufferDelegate
 
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
-        if output === cameraVideoOutput {
-            // Store the latest camera frame for compositing.
-            guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            cameraLock.lock()
-            latestCameraFrame = pb
-            cameraLock.unlock()
-        } else {
-            // Microphone audio — retimestamp to align with the screen-capture timeline.
-            guard isRecording, sessionStarted,
-                  let micInput = micAudioInput, micInput.isReadyForMoreMediaData,
-                  let aligned = alignMicBufferToSession(sampleBuffer) else { return }
-            micInput.append(aligned)
-        }
+        guard isRecording, sessionStarted,
+              let micInput = micAudioInput, micInput.isReadyForMoreMediaData,
+              let aligned = alignMicBufferToSession(sampleBuffer) else { return }
+        micInput.append(aligned)
     }
 
     // MARK: - Mic timestamp alignment
@@ -778,17 +525,6 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
             return true
         case .notDetermined:
             return await AVCaptureDevice.requestAccess(for: .audio)
-        default:
-            return false
-        }
-    }
-
-    private static func requestCameraAccess() async -> Bool {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized:
-            return true
-        case .notDetermined:
-            return await AVCaptureDevice.requestAccess(for: .video)
         default:
             return false
         }

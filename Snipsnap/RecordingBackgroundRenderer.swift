@@ -15,31 +15,14 @@ enum RecordingBackgroundRenderer {
         CGSize(width: canvasWidth * scale, height: canvasHeight * scale)
     }
 
-    /// Width reserved on the right for a vertical camera strip (strip + inset).
-    static func verticalStripReservedWidth(in canvasSize: CGSize, scale: CGFloat = 1) -> CGFloat {
-        let strip = VerticalCameraStripLayout.metrics(
-            screenWidth: canvasSize.width,
-            screenHeight: canvasSize.height,
-            scale: scale
-        )
-        return strip.width + strip.margin
-    }
-
     static func windowFrame(
         inCanvas windowSize: CGSize,
-        canvasSize: CGSize,
-        cameraStyle: CameraPreviewStyle? = nil,
-        scale: CGFloat = 1
+        canvasSize: CGSize
     ) -> CGRect {
         let margin = canvasSize.width * marginFraction
-        var contentWidth = canvasSize.width - margin * 2
+        let contentWidth = canvasSize.width - margin * 2
         let maxH = canvasSize.height - margin * 2
         guard windowSize.width > 0, windowSize.height > 0, contentWidth > 0 else { return .zero }
-
-        if cameraStyle == .vertical {
-            contentWidth -= verticalStripReservedWidth(in: canvasSize, scale: scale)
-        }
-        guard contentWidth > 0 else { return .zero }
 
         let windowAspect = windowSize.width / windowSize.height
         var drawW = contentWidth
@@ -49,14 +32,8 @@ enum RecordingBackgroundRenderer {
             drawW = drawH * windowAspect
         }
 
-        let x: CGFloat
-        if cameraStyle == .vertical {
-            x = margin + (contentWidth - drawW) / 2
-        } else {
-            x = (canvasSize.width - drawW) / 2
-        }
         return CGRect(
-            x: x,
+            x: (canvasSize.width - drawW) / 2,
             y: (canvasSize.height - drawH) / 2,
             width: drawW,
             height: drawH
@@ -71,26 +48,17 @@ enum RecordingBackgroundRenderer {
             return CIImage(color: .black).cropped(to: extent)
         case .warm:
             return linearGradient(
-                colors: [
-                    CIColor(red: 0.98, green: 0.72, blue: 0.45),
-                    CIColor(red: 0.92, green: 0.38, blue: 0.55)
-                ],
+                colors: DesignTokens.Color.RecordingGradient.warm.ci,
                 extent: extent
             )
         case .cool:
             return linearGradient(
-                colors: [
-                    CIColor(red: 0.35, green: 0.75, blue: 0.98),
-                    CIColor(red: 0.18, green: 0.42, blue: 0.92)
-                ],
+                colors: DesignTokens.Color.RecordingGradient.cool.ci,
                 extent: extent
             )
         case .midnight:
             return linearGradient(
-                colors: [
-                    CIColor(red: 0.12, green: 0.14, blue: 0.22),
-                    CIColor(red: 0.04, green: 0.05, blue: 0.10)
-                ],
+                colors: DesignTokens.Color.RecordingGradient.midnight.ci,
                 extent: extent
             )
         case .custom(let path):
@@ -119,29 +87,106 @@ enum RecordingBackgroundRenderer {
         windowImage: CIImage,
         background: RecordingBackgroundStyle,
         canvasSize: CGSize,
-        cameraStyle: CameraPreviewStyle? = nil,
         scale: CGFloat = 1
     ) -> CIImage {
         let extent = CGRect(origin: .zero, size: canvasSize)
         let backgroundImage = backgroundImage(for: background, extent: extent)
         let drawRect = windowFrame(
             inCanvas: windowImage.extent.size,
-            canvasSize: canvasSize,
-            cameraStyle: cameraStyle,
-            scale: scale
+            canvasSize: canvasSize
         )
         guard drawRect.width > 0, drawRect.height > 0 else { return backgroundImage }
 
-        let scaleX = drawRect.width / windowImage.extent.width
-        let scaleY = drawRect.height / windowImage.extent.height
+        let fitScale = min(
+            drawRect.width / windowImage.extent.width,
+            drawRect.height / windowImage.extent.height
+        )
+        let scaledW = windowImage.extent.width * fitScale
+        let scaledH = windowImage.extent.height * fitScale
+        let tx = drawRect.minX + (drawRect.width - scaledW) / 2
+        let ty = drawRect.minY + (drawRect.height - scaledH) / 2
         let scaledWindow = windowImage
-            .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
-            .transformed(by: CGAffineTransform(translationX: drawRect.minX, y: drawRect.minY))
+            .transformed(by: CGAffineTransform(scaleX: fitScale, y: fitScale))
+            .transformed(by: CGAffineTransform(translationX: tx, y: ty))
 
         guard let compositeFilter = CIFilter(name: "CISourceOverCompositing") else { return backgroundImage }
         compositeFilter.setValue(scaledWindow, forKey: kCIInputImageKey)
         compositeFilter.setValue(backgroundImage, forKey: kCIInputBackgroundImageKey)
         return compositeFilter.outputImage?.cropped(to: extent) ?? backgroundImage
+    }
+
+    /// Shared GPU-backed context for background compositing and spotlight effects.
+    static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    static func backgroundPreviewImage(
+        for style: RecordingBackgroundStyle,
+        scale: CGFloat = 1
+    ) -> NSImage? {
+        guard style != .none else { return nil }
+        let size = Self.canvasSize(for: scale)
+        let extent = CGRect(origin: .zero, size: size)
+        let image = backgroundImage(for: style, extent: extent)
+        return nsImage(from: image, logicalSize: Self.canvasSize(for: 1))
+    }
+
+    /// Full-image effect used outside a spotlight cutout (blur or desaturate).
+    static func spotlightSuppressionImage(
+        from background: NSImage,
+        technique: SpotlightTechnique
+    ) -> NSImage? {
+        guard technique != .dim else { return nil }
+        guard let cgImage = background.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+        let input = CIImage(cgImage: cgImage)
+        let extent = input.extent
+        guard extent.width > 0, extent.height > 0 else { return nil }
+
+        let output: CIImage?
+        switch technique {
+        case .dim:
+            output = nil
+        case .blur:
+            guard let filter = CIFilter(name: "CIGaussianBlur") else { return nil }
+            filter.setValue(input.clampedToExtent(), forKey: kCIInputImageKey)
+            filter.setValue(15.0, forKey: kCIInputRadiusKey)
+            output = filter.outputImage?.cropped(to: extent)
+        case .desaturate:
+            guard let filter = CIFilter(name: "CIColorControls") else { return nil }
+            filter.setValue(input, forKey: kCIInputImageKey)
+            filter.setValue(0.0, forKey: kCIInputSaturationKey)
+            output = filter.outputImage?.cropped(to: extent)
+        }
+
+        guard let output,
+              let resultCG = ciContext.createCGImage(output, from: extent) else { return nil }
+        return NSImage(cgImage: resultCG, size: background.size)
+    }
+
+    /// Places `content` centered on the preset canvas, like window capture compositing.
+    static func compositeContent(
+        _ content: NSImage,
+        background style: RecordingBackgroundStyle,
+        scale: CGFloat = 1
+    ) -> NSImage? {
+        guard style != .none else { return content }
+        guard let tiff = content.tiffRepresentation,
+              let ciImage = CIImage(data: tiff) else { return nil }
+        let outputCanvasSize = Self.canvasSize(for: scale)
+        let output = composite(
+            windowImage: ciImage,
+            background: style,
+            canvasSize: outputCanvasSize,
+            scale: scale
+        )
+        return nsImage(from: output, logicalSize: Self.canvasSize(for: 1))
+    }
+
+    private static func nsImage(from image: CIImage, logicalSize: CGSize) -> NSImage? {
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0,
+              let cgImage = ciContext.createCGImage(image, from: extent) else { return nil }
+        return NSImage(cgImage: cgImage, size: logicalSize)
     }
 
     private static func linearGradient(colors: [CIColor], extent: CGRect) -> CIImage {

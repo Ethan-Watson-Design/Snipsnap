@@ -32,8 +32,8 @@
 		F9E23FE12FF09D6E00FEF01D = {
 			isa = PBXGroup;
 			children = (
-				F9E23FEC2FF09D6E00FEF01D /* Snipsnap */,
 				F9E23FEB2FF09D6E00FEF01D /* Products */,
+				F9E23FEC2FF09D6E00FEF01D /* Snipsnap */,
 			);
 			sourceTree = "<group>";
 		};
@@ -260,7 +260,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Snipsnap uses your camera to show a picture-in-picture bubble during recordings.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Snipsnap records your microphone when you enable the mic toggle during screen recordings.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -295,7 +294,6 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "Snipsnap uses your camera to show a picture-in-picture bubble during recordings.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Snipsnap records your microphone when you enable the mic toggle during screen recordings.";
 				LD_RUNPATH_SEARCH_PATHS = (

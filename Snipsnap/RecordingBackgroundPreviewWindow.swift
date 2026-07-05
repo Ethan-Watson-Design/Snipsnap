@@ -20,8 +20,6 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
         var captureMode: CaptureMode
         var windowID: CGWindowID?
         var background: RecordingBackgroundStyle
-        var cameraDeviceID: String?
-        var cameraStyle: CameraPreviewStyle
     }
 
     private enum DisplayMode {
@@ -30,7 +28,7 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
     }
 
     static func showThumbnail(configuration: Configuration) {
-        let present = {
+        Task { @MainActor in
             guard CaptureBar.isPresented else {
                 hide()
                 return
@@ -41,58 +39,38 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
                 existing.startRefreshing()
                 return
             }
-            shared?.stopRefreshing()
-            shared?.orderOut(nil)
-            shared = RecordingBackgroundPreviewWindow(configuration: configuration, displayMode: .thumbnail)
-            shared?.orderFrontRegardless()
-            shared?.startRefreshing()
-        }
-        if Thread.isMainThread {
-            present()
-        } else {
-            DispatchQueue.main.async {
-                present()
+            if let existing = shared {
+                await existing.teardownCaptures()
+                existing.orderOut(nil)
             }
+            let window = RecordingBackgroundPreviewWindow(configuration: configuration, displayMode: .thumbnail)
+            shared = window
+            await window.startCaptures()
+            window.orderFrontRegardless()
+            window.startRefreshing()
         }
     }
 
     static func hide() {
-        let dismiss = {
-            shared?.stopRefreshing()
-            shared?.orderOut(nil)
+        Task { @MainActor in
+            if let existing = shared {
+                await existing.teardownCaptures()
+                existing.orderOut(nil)
+            }
             shared = nil
         }
-        if Thread.isMainThread {
-            dismiss()
-        } else {
-            DispatchQueue.main.async {
-                dismiss()
-            }
-        }
     }
 
-    /// Stops the preview capture stream so RecordingEngine can own window capture during recording.
-    static func transitionToRecording() {
-        DispatchQueue.main.async {
-            shared?.enterRecordingMode()
-        }
-    }
-
-    static func updateFrame(_ image: CGImage) {
-        DispatchQueue.main.async {
-            guard let window = shared else { return }
-            window.stageView?.update(image: image, screenSize: window.frame.size)
-        }
+    /// Releases preview capture so RecordingEngine can capture the same window.
+    static func transitionToRecording() async {
+        await shared?.enterRecordingMode()
     }
 
     private let configuration: Configuration
     private var displayMode: DisplayMode
     private let contentCapture = RecordingPreviewContentCapture()
-    private let cameraCapture = CameraPreviewCapture()
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
     private let renderQueue = DispatchQueue(label: "com.snipsnap.recordingBackgroundPreview", qos: .userInitiated)
-    private lazy var sourceOverFilter = CIFilter(name: "CISourceOverCompositing")
-    private lazy var blendWithMaskFilter = CIFilter(name: "CIBlendWithMask")
     private var refreshTimer: Timer?
     private weak var stageView: RecordingBackgroundStageView?
     private var isInRecordingMode = false
@@ -112,7 +90,7 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
             defer: false
         )
 
-        level = .floating
+        level = NSWindow.Level(rawValue: Int(NSWindow.Level.popUpMenu.rawValue) + 1)
         isOpaque = false
         backgroundColor = .clear
         hasShadow = true
@@ -127,11 +105,16 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
         view.onClick = { [weak self] in self?.toggleDisplayMode() }
         contentView = view
         stageView = view
+    }
 
-        Task { await contentCapture.start(configuration: configuration) }
-        if let cameraID = configuration.cameraDeviceID {
-            Task { await cameraCapture.start(deviceID: cameraID) }
-        }
+    private func startCaptures() async {
+        await contentCapture.start(configuration: configuration)
+    }
+
+    private func teardownCaptures() async {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
+        await contentCapture.stop()
     }
 
     private static func frame(for mode: DisplayMode, thumbnailWidth: CGFloat, inset: CGFloat) -> NSRect {
@@ -175,20 +158,12 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
     private func stopRefreshing() {
         refreshTimer?.invalidate()
         refreshTimer = nil
-        Task {
-            await contentCapture.stop()
-            await cameraCapture.stop()
-        }
     }
 
-    private func enterRecordingMode() {
+    private func enterRecordingMode() async {
         isInRecordingMode = true
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-        Task {
-            await contentCapture.stop()
-            await cameraCapture.stop()
-        }
+        stopRefreshing()
+        await teardownCaptures()
         if displayMode == .expanded {
             displayMode = .thumbnail
             applyLayout()
@@ -199,41 +174,30 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
         guard !isInRecordingMode else { return }
 
         let background = configuration.background
-        let cameraStyle = configuration.cameraStyle
-        let hasCamera = configuration.cameraDeviceID != nil
         let screenSize = frame.size
         let scale = NSScreen.main?.backingScaleFactor ?? 2
         let canvasSize = RecordingBackgroundRenderer.canvasSize(for: scale)
         let contentImage = contentCapture.latestCIImage()
-        let isRecordWindow: Bool
+        let isWindowCapture: Bool
         switch configuration.captureMode {
-        case .recordWindow: isRecordWindow = true
-        default: isRecordWindow = false
+        case .recordWindow, .screenshotWindow: isWindowCapture = true
+        default: isWindowCapture = false
         }
         let backgroundIsNone: Bool
         switch background {
         case .none: backgroundIsNone = true
         default: backgroundIsNone = false
         }
-        let cameraIsVertical: Bool
-        switch cameraStyle {
-        case .vertical: cameraIsVertical = true
-        case .square: cameraIsVertical = false
-        }
-
-        let cameraImage = hasCamera ? cameraCapture.latestCIImage() : nil
         let extent = CGRect(origin: .zero, size: canvasSize)
         var composited: CIImage
 
         if let contentImage {
-            let useCompositeLayout = isRecordWindow && (!backgroundIsNone || hasCamera)
+            let useCompositeLayout = isWindowCapture && !backgroundIsNone
             if useCompositeLayout {
-                let layoutCamera: CameraPreviewStyle? = hasCamera && cameraIsVertical ? .vertical : nil
                 composited = RecordingBackgroundRenderer.composite(
                     windowImage: contentImage,
                     background: background,
                     canvasSize: canvasSize,
-                    cameraStyle: layoutCamera,
                     scale: scale
                 )
             } else {
@@ -243,14 +207,12 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
             composited = RecordingBackgroundRenderer.backgroundImage(for: background, extent: extent)
         }
 
-        if hasCamera, let cameraImage {
-            composited = compositeCamera(cameraImage, onto: composited, style: cameraStyle, scale: scale)
-                ?? composited
-        }
+        let renderRect = CGRect(origin: .zero, size: canvasSize)
+        let toRender = composited.clampedToExtent().cropped(to: renderRect)
 
         renderQueue.async { [weak self] in
             guard let self else { return }
-            guard let cgImage = self.ciContext.createCGImage(composited, from: composited.extent) else { return }
+            guard let cgImage = self.makeCGImage(from: toRender, size: canvasSize) else { return }
             DispatchQueue.main.async {
                 self.stageView?.update(image: cgImage, screenSize: screenSize)
             }
@@ -268,64 +230,31 @@ final class RecordingBackgroundPreviewWindow: NSPanel {
             .cropped(to: extent)
     }
 
-    private func compositeCamera(
-        _ cameraFrame: CIImage,
-        onto screen: CIImage,
-        style: CameraPreviewStyle,
-        scale: CGFloat
-    ) -> CIImage? {
-        let screenW = screen.extent.width
-        let screenH = screen.extent.height
-        let camW = cameraFrame.extent.width
-        let camH = cameraFrame.extent.height
-        let mirrorTx = CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -camW, y: 0)
-        let ciCamera = cameraFrame.transformed(by: mirrorTx)
-
-        let margin: CGFloat
-        switch style {
-        case .square:
-            let side = 100.0 * scale
-            margin = 20.0 * scale
-            let camScale = side / min(camW, camH)
-            let scaledW = camW * camScale
-            let scaledH = camH * camScale
-            let cropRect = CGRect(x: (scaledW - side) / 2, y: (scaledH - side) / 2, width: side, height: side)
-            let croppedCam = ciCamera
-                .transformed(by: CGAffineTransform(scaleX: camScale, y: camScale))
-                .cropped(to: cropRect)
-            let tx = screenW - side - margin - croppedCam.extent.minX
-            let ty = margin - croppedCam.extent.minY
-            let positioned = croppedCam.transformed(by: CGAffineTransform(translationX: tx, y: ty))
-            return sourceOver(positioned, over: screen)
-
-        case .vertical:
-            let strip = VerticalCameraStripLayout.metrics(screenWidth: screenW, screenHeight: screenH, scale: scale)
-            let stripW = strip.width
-            let stripH = strip.height
-            let camScale = max(stripW / camW, stripH / camH)
-            let scaledW = camW * camScale
-            let scaledH = camH * camScale
-            let cropRect = CGRect(x: (scaledW - stripW) / 2, y: (scaledH - stripH) / 2, width: stripW, height: stripH)
-            let croppedCam = ciCamera
-                .transformed(by: CGAffineTransform(scaleX: camScale, y: camScale))
-                .cropped(to: cropRect)
-            let tx = strip.originX - croppedCam.extent.minX
-            let ty = strip.originY - croppedCam.extent.minY
-            let positioned = croppedCam.transformed(by: CGAffineTransform(translationX: tx, y: ty))
-            let mask = VerticalCameraStripLayout.roundedRectMask(
-                rect: CGRect(origin: .zero, size: CGSize(width: stripW, height: stripH)),
-                cornerRadius: strip.cornerRadius,
-                translatedTo: CGPoint(x: tx, y: ty)
-            )
-            return VerticalCameraStripLayout.compositeWithRoundedMask(positioned, mask: mask, over: screen)
+    private func makeCGImage(from image: CIImage, size: CGSize) -> CGImage? {
+        let bounds = CGRect(origin: .zero, size: size)
+        let finite = image.clampedToExtent().cropped(to: bounds)
+        if let cgImage = ciContext.createCGImage(finite, from: bounds) {
+            return cgImage
         }
-    }
-
-    private func sourceOver(_ foreground: CIImage, over background: CIImage) -> CIImage? {
-        guard let filter = sourceOverFilter else { return nil }
-        filter.setValue(foreground, forKey: kCIInputImageKey)
-        filter.setValue(background, forKey: kCIInputBackgroundImageKey)
-        return filter.outputImage
+        let width = Int(size.width)
+        let height = Int(size.height)
+        var buffer: CVPixelBuffer?
+        let attrs: [CFString: Any] = [
+            kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey: width,
+            kCVPixelBufferHeightKey: height,
+            kCVPixelBufferIOSurfacePropertiesKey: [:]
+        ]
+        guard CVPixelBufferCreate(
+            kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, attrs as CFDictionary, &buffer
+        ) == kCVReturnSuccess, let buffer else { return nil }
+        ciContext.render(
+            finite,
+            to: buffer,
+            bounds: bounds,
+            colorSpace: CGColorSpaceCreateDeviceRGB()
+        )
+        return ciContext.createCGImage(CIImage(cvPixelBuffer: buffer), from: bounds)
     }
 }
 
@@ -347,7 +276,7 @@ private final class RecordingPreviewContentCapture: NSObject, SCStreamOutput {
             let height: Int
 
             switch configuration.captureMode {
-            case .recordWindow:
+            case .recordWindow, .screenshotWindow:
                 guard let windowID = configuration.windowID,
                       let window = content.windows.first(where: { $0.windowID == windowID }) else { return }
                 filter = SCContentFilter(desktopIndependentWindow: window)
@@ -403,62 +332,6 @@ private final class RecordingPreviewContentCapture: NSObject, SCStreamOutput {
     }
 }
 
-// MARK: - Camera capture for preview
-
-private final class CameraPreviewCapture: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-    private var session: AVCaptureSession?
-    private var latestFrame: CVPixelBuffer?
-    private let frameQueue = DispatchQueue(label: "com.snipsnap.cameraPreviewCapture.frames")
-
-    func start(deviceID: String) async {
-        await stop()
-        let captureSession = AVCaptureSession()
-        captureSession.sessionPreset = .medium
-
-        guard let device = AVCaptureDevice(uniqueID: deviceID)
-                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-                ?? AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device),
-              captureSession.canAddInput(input) else { return }
-
-        captureSession.addInput(input)
-        let output = AVCaptureVideoDataOutput()
-        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)]
-        output.alwaysDiscardsLateVideoFrames = true
-        output.setSampleBufferDelegate(self, queue: .global(qos: .userInitiated))
-        guard captureSession.canAddOutput(output) else { return }
-        captureSession.addOutput(output)
-
-        session = captureSession
-        let sessionToStart = captureSession
-        DispatchQueue.global(qos: .userInitiated).async {
-            sessionToStart.startRunning()
-        }
-    }
-
-    func stop() async {
-        session?.stopRunning()
-        session = nil
-        frameQueue.sync { latestFrame = nil }
-    }
-
-    func latestCIImage() -> CIImage? {
-        frameQueue.sync {
-            guard let latestFrame else { return nil }
-            return CIImage(cvPixelBuffer: latestFrame)
-        }
-    }
-
-    func captureOutput(
-        _ output: AVCaptureOutput,
-        didOutput sampleBuffer: CMSampleBuffer,
-        from connection: AVCaptureConnection
-    ) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        frameQueue.sync { latestFrame = pixelBuffer }
-    }
-}
-
 // MARK: - Stage view
 
 private final class RecordingBackgroundStageView: NSView {
@@ -486,14 +359,11 @@ private final class RecordingBackgroundStageView: NSView {
         super.layout()
         guard let root = layer else { return }
         if isThumbnail {
-            root.cornerRadius = 10
+            root.cornerRadius = DesignTokens.Radius.lg
             root.masksToBounds = true
             root.borderWidth = 2
             root.borderColor = NSColor.white.withAlphaComponent(0.25).cgColor
-            root.shadowColor = NSColor.black.cgColor
-            root.shadowOpacity = 0.45
-            root.shadowRadius = 10
-            root.shadowOffset = CGSize(width: 0, height: -2)
+            DesignTokens.Elevation.panelRaised.apply(to: root)
         } else {
             root.cornerRadius = 0
             root.masksToBounds = true

@@ -18,7 +18,7 @@ A free, native-feeling macOS capture tool. Screenshots, screen recording, FigJam
 | **Distribution** | Direct (not App Store) |
 | **Pricing** | Free |
 | **Save location** | User picks a root folder during onboarding; Snipsnap auto-organizes into product-named subfolders beneath it (see Dynamic Save Location below) |
-| **Auto-organize analysis** | On-device only — app/window metadata + Vision OCR, no cloud calls, nothing leaves the Mac |
+| **Auto-organize analysis** | On-device only — app/window metadata + Vision OCR, escalating to the on-device Foundation Models LLM for naming/categorization when available; no cloud calls, nothing leaves the Mac; falls back to dropping the file in the root folder untouched if analysis can't produce a confident answer |
 | **Auto-organize behavior** | Suggest, user confirms — file saves immediately, a toast chip proposes the folder, one tap to move it |
 | **Default output** | Auto-copy to clipboard + save to folder + toast preview |
 | **Toast behavior** | Click toast → opens annotation window |
@@ -175,10 +175,16 @@ Spotlight-style text panel that coexists with or replaces the visual Capture Bar
 
 **Priority:** MVP, alongside the screenshot-first flow — this is the second flagship feature for v1.0, not a post-launch nice-to-have.
 
-**Analysis approach — on-device only, no cloud calls, nothing leaves the Mac:**
+**Analysis approach — on-device only, no cloud calls, nothing leaves the Mac. Tiered, with graceful degradation at every step:**
 - **Primary signal — app/window metadata (free, deterministic):** at capture time, read the frontmost app's bundle identifier and window title (ScreenCaptureKit / Accessibility APIs already have this). "Figma," "Google Chrome — Linear," "Xcode" are strong, reliable product names with zero image analysis needed.
 - **Secondary signal — Vision framework OCR (on-device):** run text recognition on the captured image to pull page/section names, headings, or button labels visible on screen (e.g. "Design System," "Settings," "Pricing"). Used to propose a *subfolder* under the primary product folder, and to disambiguate generic window titles (e.g. a browser tab titled "New Tab").
-- No CoreML classifier needed for v1 — app metadata + OCR text covers "what product" and "what part of it" without training or bundling a model.
+- **Reasoning tier — on-device LLM via Apple's Foundation Models framework (Apple Intelligence), when available:** feed the app/window metadata + OCR'd text to the local model and have it pick/generate the folder + subfolder name, rather than relying on raw string matching. Runs entirely on-device via the Swift `FoundationModels` API — no API key, no network call, no per-capture cost. This is what actually makes the naming feel "smart" (e.g. collapsing "New Tab — Google Chrome" + OCR'd page contents into "Chrome / Linear Issue #482" instead of a literal string match).
+- **Availability gate:** Foundation Models requires Apple Intelligence to be supported *and enabled* (Apple Silicon with sufficient RAM, OS version, user opt-in in System Settings). Check availability at analysis time (`SystemLanguageModel.default.availability`) — don't assume it's there.
+- **Fallback chain (never blocks, never errors visibly):**
+  1. Foundation Models available → LLM proposes folder/subfolder from metadata + OCR.
+  2. Foundation Models unavailable/unsupported → fall back to rule-based app-metadata + OCR matching (the original v1 plan, still fully functional on its own).
+  3. Neither signal resolves anything usable (e.g. full-screen capture spanning apps, empty OCR, ambiguous title) → **drop the file into the user's root save folder untouched, no chip shown.** This is the same behavior as today's flat save — auto-organize is additive, never a blocker, and a failed/unavailable analysis should be indistinguishable from the feature not existing.
+- No CoreML classifier needed for v1 — app metadata + OCR text + (optionally) the local LLM covers "what product" and "what part of it" without training or bundling a custom model.
 
 **Behavior (suggest, user confirms):**
 1. File saves immediately to the root folder the user picked in onboarding — capture speed never waits on analysis.
@@ -190,11 +196,12 @@ Spotlight-style text panel that coexists with or replaces the visual Capture Bar
 
 **Scope:** applies to both screenshots and recordings (same capture pipeline, same metadata available at capture time) — screenshots remain the priority surface to polish first, but there's no separate implementation needed to cover recordings once this ships.
 
-**Data model:** `CaptureDestination { productFolder: String, subfolder: String?, confidence: Double, source: .windowMetadata | .ocr }`. A small on-disk mapping cache (`[WindowSignature: CaptureDestination]`) backs the "remembered" behavior in step 5.
+**Data model:** `CaptureDestination { productFolder: String, subfolder: String?, confidence: Double, source: .windowMetadata | .ocr | .localLLM }`. A small on-disk mapping cache (`[WindowSignature: CaptureDestination]`) backs the "remembered" behavior in step 5 — once the LLM (or rules) resolve a mapping once, it's reused without re-running inference.
 
 **Open questions:**
-- Fallback name when neither signal resolves (full-screen capture spanning multiple apps, or an app with an unhelpful bundle name) — likely an "Unsorted" folder rather than skipping the chip entirely.
+- Whether "no confident answer" should still drop a silent file in the root folder (current lean, see fallback chain above) vs. showing an explicit "Unsorted" folder chip — leaning toward silent root-drop so a cold/unavailable model never degrades the base experience.
 - Whether the folder-chip mapping cache should be editable/visible in Settings (a simple list of "Figma → Design System" rules the user can rename or delete).
+- Latency budget for the LLM tier — needs to resolve within the toast's visible window (~4s) or the chip should simply not appear rather than appearing late.
 
 ---
 
@@ -303,6 +310,7 @@ All three are independent. Snipsnap asks for mic and system audio permissions on
 | UserDefaults | Hotkey preferences, settings |
 | Vision (on-device) | OCR text extraction for Auto-Organize subfolder suggestions (and future scrolling-capture OCR) |
 | Accessibility / NSWorkspace | Frontmost app bundle ID + window title at capture time — primary Auto-Organize signal |
+| Foundation Models (on-device, Apple Intelligence) | Optional reasoning tier for Auto-Organize — turns metadata + OCR text into a smarter folder/subfolder name; checked for availability, falls back gracefully when absent |
 
 ---
 
@@ -328,7 +336,9 @@ Snipsnap/
 ├── AudioRingBuffer.swift         # AVAudioEngine tap → circular buffer in RAM
 ├── ClipEngine.swift              # Flush buffer → M4A on "clip that"
 ├── CommandBar.swift              # Future: Spotlight-style text command panel
-├── CaptureClassifier.swift       # MVP: app/window metadata + Vision OCR → CaptureDestination suggestion
+├── CaptureClassifier.swift       # MVP: app/window metadata + Vision OCR → CaptureDestination suggestion,
+│                                     escalating to on-device Foundation Models LLM when available, else
+│                                     falling back to rules, else falling back to root folder (no chip)
 └── AutoOrganizer.swift           # MVP: folder chip, create-on-demand nesting, mapping cache
 ```
 
@@ -405,9 +415,10 @@ No onboarding exists yet. First launch silently falls back to Desktop for save l
 **MVP flagship feature #2**, alongside the screenshot loop — see full spec above. Not started.
 - [ ] `CaptureClassifier.swift` — read frontmost app bundle ID + window title at capture time
 - [ ] Vision OCR pass on the captured image for subfolder signal (page/section names, headings)
+- [ ] Foundation Models availability check (`SystemLanguageModel.default.availability`) + local LLM call to turn metadata + OCR text into a folder/subfolder proposal
+- [ ] Fallback chain: LLM → rule-based metadata/OCR matching → silent drop into root folder (no chip) — verify each tier degrades without blocking capture or showing an error
 - [ ] `AutoOrganizer.swift` — folder chip on toast, create-on-demand nesting under the user's root save folder
-- [ ] Mapping cache so confirmed product → folder choices are remembered without re-running OCR
-- [ ] Fallback "Unsorted" folder when neither signal resolves
+- [ ] Mapping cache so confirmed product → folder choices are remembered without re-running OCR or the LLM
 - [ ] Decide whether the mapping cache is user-editable in Settings
 
 ### v1.0 — Launch

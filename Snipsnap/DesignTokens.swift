@@ -103,10 +103,33 @@ enum DesignTokens {
         static let panelHoverFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.10))
         static let panelActiveFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.14))
 
+        /// Neutral surface at HSL lightness (achromatic). AppKit HSB brightness matches HSL L when S=0.
+        static func neutralSurface(lightness: CGFloat) -> TokenColor {
+            TokenColor(ns: NSColor(calibratedHue: 0, saturation: 0, brightness: lightness, alpha: 1))
+        }
+
+        /// Active toolbar controls, tooltips. HSL L=15.
+        static let primary = neutralSurface(lightness: 0.15)
+
+        /// Icons and labels on `primary` surfaces.
+        static let textOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.85))
+
+        /// Dividers on `primary` surfaces.
+        static let borderOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.12))
+
+        /// Light floating panel surface (annotation toolbar, spotlight preferences). HSL L=97.
+        static let panelSurface = neutralSurface(lightness: 0.97)
+
+        /// Dividers on `panelSurface`.
+        static let borderOnPanel = TokenColor(ns: NSColor.black.withAlphaComponent(0.12))
+
         // Brand
 
-        /// Primary accent — selection handles, focus rings (pink).
+        /// Primary accent — focus rings, highlights (pink).
         static let accent = TokenColor(ns: NSColor(calibratedRed: 0xE8 / 255, green: 0x32 / 255, blue: 0x8C / 255, alpha: 1))
+
+        /// Secondary accent — selection outlines, interactive emphasis (blue).
+        static let secondary = TokenColor(ns: NSColor(calibratedRed: 0x50 / 255, green: 0x80 / 255, blue: 0xFF / 255, alpha: 1))
 
         /// Region capture overlay border and handles.
         static let regionSelectionAccent = TokenColor(ns: NSColor(calibratedWhite: 0.72, alpha: 0.55))
@@ -212,11 +235,21 @@ enum DesignTokens {
             }
         }
 
-        func apply(to layer: CALayer) {
+        func apply(to layer: CALayer, roundedPathIn bounds: CGRect? = nil, cornerRadius: CGFloat = 0) {
             layer.shadowColor = color.cgColor
             layer.shadowOpacity = opacity
             layer.shadowRadius = radius
             layer.shadowOffset = offset
+            if let bounds {
+                layer.shadowPath = CGPath(
+                    roundedRect: bounds,
+                    cornerWidth: cornerRadius,
+                    cornerHeight: cornerRadius,
+                    transform: nil
+                )
+            } else {
+                layer.shadowPath = nil
+            }
         }
     }
 }

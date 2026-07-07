@@ -11,10 +11,8 @@ enum AppSettings {
 
     static let spotlightDimOpacityNotches: [CGFloat] = [0, 0.05, 0.15, 0.30, 0.60]
     static let spotlightBlurRadiusNotches: [CGFloat] = [0, 1, 2, 5, 10]
-    static let spotlightSoftnessNotches: [CGFloat] = [0, 2, 4, 8, 16]
     static let spotlightDimOpacityDefault: CGFloat = 0.30
     static let spotlightBlurRadiusDefault: CGFloat = 5
-    static let spotlightSoftnessDefault: CGFloat = 0
 
     static func snapSpotlightDimOpacity(_ value: CGFloat) -> CGFloat {
         spotlightDimOpacityNotches.min(by: { abs($0 - value) < abs($1 - value) }) ?? spotlightDimOpacityDefault
@@ -22,10 +20,6 @@ enum AppSettings {
 
     static func snapSpotlightBlurRadius(_ value: CGFloat) -> CGFloat {
         spotlightBlurRadiusNotches.min(by: { abs($0 - value) < abs($1 - value) }) ?? spotlightBlurRadiusDefault
-    }
-
-    static func snapSpotlightSoftness(_ value: CGFloat) -> CGFloat {
-        spotlightSoftnessNotches.min(by: { abs($0 - value) < abs($1 - value) }) ?? spotlightSoftnessDefault
     }
 
     static func spotlightDimOpacityIndex(for value: CGFloat) -> Int {
@@ -36,11 +30,6 @@ enum AppSettings {
     static func spotlightBlurRadiusIndex(for value: CGFloat) -> Int {
         let snapped = snapSpotlightBlurRadius(value)
         return spotlightBlurRadiusNotches.firstIndex(of: snapped) ?? 3
-    }
-
-    static func spotlightSoftnessIndex(for value: CGFloat) -> Int {
-        let snapped = snapSpotlightSoftness(value)
-        return spotlightSoftnessNotches.firstIndex(of: snapped) ?? 0
     }
 
     static var destinationFolderURL: URL {

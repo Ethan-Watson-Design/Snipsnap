@@ -10,6 +10,37 @@ import AppKit
 import AVFoundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let menuBarIconImage: NSImage = {
+        let side: CGFloat = 16
+        let cornerRadius: CGFloat = 5
+
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
+            let background = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+            NSColor(white: 0.94, alpha: 1).setFill()
+            background.fill()
+
+            let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+            let text = NSAttributedString(
+                string: "\u{2042}", // ⁂ asterism
+                attributes: [.font: font, .foregroundColor: NSColor.black]
+            )
+            let textSize = text.size()
+            let origin = NSPoint(
+                x: (side - textSize.width) / 2,
+                y: (side - textSize.height) / 2
+            )
+
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current?.compositingOperation = .destinationOut
+            text.draw(at: origin)
+            NSGraphicsContext.restoreGraphicsState()
+
+            return true
+        }
+        image.isTemplate = false
+        return image
+    }()
+
     private var statusItem: NSStatusItem!
     private var globalMonitor: Any?
     private var localHotkeyMonitor: Any?
@@ -24,7 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "rectangle.dashed.badge.record", accessibilityDescription: "Snipsnap")
+            applyIdleStatusItemAppearance(to: button)
         }
 
         rebuildMenu()
@@ -368,9 +399,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.action = nil
             button.target = nil
-            button.title = ""
-            button.image = NSImage(systemSymbolName: "rectangle.dashed.badge.record", accessibilityDescription: "Snipsnap")
+            applyIdleStatusItemAppearance(to: button)
         }
+    }
+
+    private func applyIdleStatusItemAppearance(to button: NSStatusBarButton) {
+        button.title = ""
+        button.image = Self.menuBarIconImage
+        button.imagePosition = .imageOnly
+        button.toolTip = "Snipsnap"
     }
 
     private func updateRecordingStatusDisplay() {

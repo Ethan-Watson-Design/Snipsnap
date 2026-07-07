@@ -285,6 +285,7 @@ final class VideoAnnotationWindow: NSWindow {
     private var timeObserverToken: Any?
     private var undoRedoKeyMonitor: Any?
     private var videoDuration: Double = 0
+    private var videoNaturalSize: CGSize = .zero
     private var isScrubbing = false
     private var contentContainer: NSView?
     private var timelineBg: NSView?
@@ -497,20 +498,19 @@ final class VideoAnnotationWindow: NSWindow {
     // MARK: - Wire
 
     private func updateToolbarAccessoryControls() {
+        updateSpotlightCoordinateMapping()
         pill.showsSpotlightAccessoryControls = canvas.prefersSpotlightToolbarAccessory()
+        pill.showsColorAccessoryControls = canvas.prefersColorToolbarAccessory()
         pill.spotlightAffectsAllInstances = canvas.appliesSpotlightEffectGlobally
         if let settings = canvas.spotlightSettingsForEditing() {
             pill.selectedSpotlightDimOpacity = AppSettings.snapSpotlightDimOpacity(settings.dimOpacity)
             pill.selectedSpotlightBlurRadius = AppSettings.snapSpotlightBlurRadius(settings.blurRadius)
-            pill.selectedSpotlightSoftness = AppSettings.snapSpotlightSoftness(settings.softness)
             pill.spotlightOptionsRegion = settings.region
             canvas.selectedSpotlightDimOpacity = settings.dimOpacity
             canvas.selectedSpotlightBlurRadius = settings.blurRadius
-            canvas.selectedSpotlightSoftness = settings.softness
         } else if canvas.selectedTool == .spotlight {
             pill.selectedSpotlightDimOpacity = canvas.selectedSpotlightDimOpacity
             pill.selectedSpotlightBlurRadius = canvas.selectedSpotlightBlurRadius
-            pill.selectedSpotlightSoftness = canvas.selectedSpotlightSoftness
         }
         syncToolbarPreferencesFromSelection()
     }
@@ -547,6 +547,37 @@ final class VideoAnnotationWindow: NSWindow {
         }
     }
 
+    private func spotlightImageCoordinateContext() -> (contentFrame: CGRect, imagePixelSize: CGSize) {
+        let contentFrame = NSRect(origin: .zero, size: canvas.bounds.size)
+        let pixelSize = videoNaturalSize.width > 0 && videoNaturalSize.height > 0
+            ? videoNaturalSize
+            : contentFrame.size
+        return (contentFrame, pixelSize)
+    }
+
+    private func updateSpotlightCoordinateMapping() {
+        let context = spotlightImageCoordinateContext()
+        pill.spotlightImagePixelSize = context.imagePixelSize
+        pill.mapSpotlightRegionToPanel = { [weak self] region in
+            guard let self else { return region }
+            let context = self.spotlightImageCoordinateContext()
+            return SpotlightRegionCoordinates.displayRegion(
+                region,
+                contentFrame: context.contentFrame,
+                imagePixelSize: context.imagePixelSize
+            )
+        }
+        pill.mapSpotlightRegionFromPanel = { [weak self] region in
+            guard let self else { return region }
+            let context = self.spotlightImageCoordinateContext()
+            return SpotlightRegionCoordinates.canvasRegion(
+                region,
+                contentFrame: context.contentFrame,
+                imagePixelSize: context.imagePixelSize
+            )
+        }
+    }
+
     private func wire() {
         canvas.videoMode = true
         canvas.allowedTools = Set(AnnotationTool.videoTools)
@@ -555,7 +586,7 @@ final class VideoAnnotationWindow: NSWindow {
         pill.selectedColor = NSColor.annotationPalette[0]
         pill.selectedSpotlightDimOpacity = canvas.selectedSpotlightDimOpacity
         pill.selectedSpotlightBlurRadius = canvas.selectedSpotlightBlurRadius
-        pill.selectedSpotlightSoftness = canvas.selectedSpotlightSoftness
+        updateSpotlightCoordinateMapping()
 
         playerView.zoomAnnotationsProvider = { [weak self] in
             self?.canvas.annotations ?? []
@@ -623,6 +654,14 @@ final class VideoAnnotationWindow: NSWindow {
             self?.close()
         }
 
+        canvas.onActiveToolUseChanged = { [weak self] active in
+            self?.pill.setCanvasActivelyUsingTool(active)
+        }
+
+        canvas.onActiveToolPointerMoved = { [weak self] location in
+            self?.pill.handleCanvasToolPointer(at: location)
+        }
+
         pill.onToolSelected = { [weak self] tool in
             guard let self else { return }
             canvas.selectedTool = tool
@@ -669,13 +708,6 @@ final class VideoAnnotationWindow: NSWindow {
             canvas.needsDisplay = true
         }
 
-        pill.onSpotlightSoftnessChanged = { [weak self] softness in
-            guard let self else { return }
-            canvas.applySpotlightSoftness(softness)
-            pill.selectedSpotlightSoftness = softness
-            canvas.needsDisplay = true
-        }
-
         pill.onSpotlightRegionChanged = { [weak self] region in
             guard let self else { return }
             canvas.applySpotlightRegion(region)
@@ -685,12 +717,12 @@ final class VideoAnnotationWindow: NSWindow {
 
         pill.onSpotlightOptionsWillShow = { [weak self] in
             guard let self else { return }
+            self.updateSpotlightCoordinateMapping()
             let affectsAll = canvas.appliesSpotlightEffectGlobally
             if let settings = canvas.spotlightSettingsForEditing() {
                 pill.syncSpotlightOptionsPanel(
                     dimOpacity: settings.dimOpacity,
                     blurRadius: settings.blurRadius,
-                    softness: settings.softness,
                     region: settings.region,
                     affectsAllSpotlights: affectsAll
                 )
@@ -698,7 +730,6 @@ final class VideoAnnotationWindow: NSWindow {
                 pill.syncSpotlightOptionsPanel(
                     dimOpacity: canvas.selectedSpotlightDimOpacity,
                     blurRadius: canvas.selectedSpotlightBlurRadius,
-                    softness: canvas.selectedSpotlightSoftness,
                     region: pill.spotlightOptionsRegion,
                     affectsAllSpotlights: affectsAll
                 )
@@ -726,12 +757,21 @@ final class VideoAnnotationWindow: NSWindow {
 
         Task { [weak self] in
             guard let self, let asset = self.player.currentItem?.asset else { return }
-            guard let duration = try? await asset.load(.duration) else { return }
+            async let durationLoad = asset.load(.duration)
+            async let tracksLoad = asset.load(.tracks)
+            guard let duration = try? await durationLoad,
+                  let tracks = try? await tracksLoad,
+                  let videoTrack = tracks.first(where: { $0.mediaType == .video }) else { return }
+            let naturalSize = try? await videoTrack.load(.naturalSize)
             let total = CMTimeGetSeconds(duration)
             await MainActor.run {
                 guard total.isFinite, total > 0 else { return }
                 self.videoDuration = total
                 self.timeline.videoDuration = total
+                if let naturalSize, naturalSize.width > 0, naturalSize.height > 0 {
+                    self.videoNaturalSize = naturalSize
+                    self.updateSpotlightCoordinateMapping()
+                }
             }
         }
 
@@ -743,9 +783,8 @@ final class VideoAnnotationWindow: NSWindow {
         )
 
         undoRedoKeyMonitor = canvas.installUndoRedoKeyMonitor(for: self)
+        updateToolbarAccessoryControls()
     }
-
-    // MARK: - Playback
 
     private func installPlaybackTimeObserver() {
         guard timeObserverToken == nil else { return }

@@ -128,6 +128,10 @@ final class BackgroundStyleSwatch: NSControl {
 final class ShipItPanelView: NSView {
 
     static let panelWidth: CGFloat = 252
+    static let edgeInset: CGFloat = DesignTokens.Spacing.lg
+
+    private static var contentWidth: CGFloat { panelWidth - contentPadding * 2 }
+    private static let contentPadding = DesignTokens.Spacing.md
 
     static let presetStyles: [RecordingBackgroundStyle] = [.none, .warm, .cool, .midnight]
 
@@ -163,8 +167,9 @@ final class ShipItPanelView: NSView {
         isPresented ? Self.panelWidth : 0
     }
 
-    private let contentPanel = NSVisualEffectView()
+    private let contentPanel = NSView()
     private let scrollView = NSScrollView()
+    private let documentContainer = FlippedClipView()
     private let stackView = NSStackView()
     private let sideBySideSection = NSView()
     private let sideBySideEnableSwitch = NSSwitch()
@@ -186,13 +191,25 @@ final class ShipItPanelView: NSView {
             return
         }
         isHidden = false
+        let inset = Self.edgeInset
+        let panelHeight = max(0, containerBounds.height - inset * 2)
         frame = NSRect(
-            x: containerBounds.width - Self.panelWidth,
-            y: 0,
+            x: containerBounds.width - Self.panelWidth - inset,
+            y: inset,
             width: Self.panelWidth,
-            height: containerBounds.height
+            height: panelHeight
         )
         contentPanel.frame = NSRect(origin: .zero, size: frame.size)
+        applyPanelShadow()
+    }
+
+    private func applyPanelShadow() {
+        guard let layer = contentPanel.layer else { return }
+        DesignTokens.Elevation.panel.apply(
+            to: layer,
+            roundedPathIn: contentPanel.bounds,
+            cornerRadius: DesignTokens.Radius.lg
+        )
     }
 
     func dismiss() {
@@ -205,13 +222,11 @@ final class ShipItPanelView: NSView {
         wantsLayer = true
         isHidden = true
 
-        contentPanel.material = .popover
-        contentPanel.blendingMode = .behindWindow
-        contentPanel.state = .active
         contentPanel.wantsLayer = true
+        contentPanel.layer?.backgroundColor = NSColor.white.cgColor
         contentPanel.layer?.cornerRadius = DesignTokens.Radius.lg
-        contentPanel.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
-        contentPanel.layer?.masksToBounds = true
+        contentPanel.layer?.cornerCurve = .continuous
+        contentPanel.layer?.masksToBounds = false
         addSubview(contentPanel)
 
         scrollView.hasVerticalScroller = true
@@ -221,24 +236,34 @@ final class ShipItPanelView: NSView {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentPanel.addSubview(scrollView)
 
+        documentContainer.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = documentContainer
+
         stackView.orientation = .vertical
         stackView.alignment = .leading
         stackView.spacing = 14
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.documentView = stackView
+        documentContainer.addSubview(stackView)
 
         stackView.addArrangedSubview(makeHeaderRow())
         stackView.addArrangedSubview(makeSectionLabel("Background"))
         stackView.addArrangedSubview(makeBackgroundSwatchRow())
         stackView.addArrangedSubview(makeSideBySideSection())
 
+        let padding = Self.contentPadding
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: contentPanel.topAnchor, constant: DesignTokens.Spacing.sm),
-            scrollView.leadingAnchor.constraint(equalTo: contentPanel.leadingAnchor, constant: DesignTokens.Spacing.xs),
-            scrollView.trailingAnchor.constraint(equalTo: contentPanel.trailingAnchor, constant: -DesignTokens.Spacing.xs),
-            scrollView.bottomAnchor.constraint(equalTo: contentPanel.bottomAnchor, constant: -DesignTokens.Spacing.sm),
-            stackView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor, constant: -DesignTokens.Spacing.sm),
+            scrollView.topAnchor.constraint(equalTo: contentPanel.topAnchor, constant: padding),
+            scrollView.leadingAnchor.constraint(equalTo: contentPanel.leadingAnchor, constant: padding),
+            scrollView.trailingAnchor.constraint(equalTo: contentPanel.trailingAnchor, constant: -padding),
+            scrollView.bottomAnchor.constraint(equalTo: contentPanel.bottomAnchor, constant: -padding),
+            stackView.topAnchor.constraint(equalTo: documentContainer.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: documentContainer.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: documentContainer.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: documentContainer.bottomAnchor),
+            documentContainer.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
         ])
+
+        applyPanelShadow()
 
         refreshBackgroundSwatches()
         refreshSideBySideUI()
@@ -272,7 +297,7 @@ final class ShipItPanelView: NSView {
             closeBtn.trailingAnchor.constraint(equalTo: row.trailingAnchor),
             closeBtn.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             row.heightAnchor.constraint(equalToConstant: 22),
-            row.widthAnchor.constraint(equalToConstant: 220),
+            row.widthAnchor.constraint(equalToConstant: Self.contentWidth),
         ])
         return row
     }
@@ -336,12 +361,12 @@ final class ShipItPanelView: NSView {
             sideBySideEnableSwitch.trailingAnchor.constraint(equalTo: titleRow.trailingAnchor),
             sideBySideEnableSwitch.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
             titleRow.heightAnchor.constraint(equalToConstant: 22),
-            titleRow.widthAnchor.constraint(equalToConstant: 220),
+            titleRow.widthAnchor.constraint(equalToConstant: Self.contentWidth),
         ])
 
         sideBySideTilesContainer.translatesAutoresizingMaskIntoConstraints = false
         sideBySideTilesContainer.heightAnchor.constraint(equalToConstant: 128).isActive = true
-        sideBySideTilesContainer.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        sideBySideTilesContainer.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
 
         sideBySideSwapButton.title = "Swap Order"
         sideBySideSwapButton.bezelStyle = .rounded
@@ -412,7 +437,7 @@ final class ShipItPanelView: NSView {
             let label = NSTextField(labelWithString: "No previous screenshots")
             label.font = NSFont.snipsnap(.caption)
             label.textColor = .secondaryLabelColor
-            label.frame = NSRect(x: 0, y: 24, width: 220, height: 16)
+            label.frame = NSRect(x: 0, y: 24, width: Self.contentWidth, height: 16)
             sideBySideTilesContainer.addSubview(label)
             return
         }
@@ -501,4 +526,8 @@ final class ShipItPanelView: NSView {
         sideBySideEnableSwitch.state = .on
         onSideBySideChanged?(settings)
     }
+}
+
+private final class FlippedClipView: NSView {
+    override var isFlipped: Bool { true }
 }

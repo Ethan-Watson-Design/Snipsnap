@@ -30,6 +30,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
 
     private nonisolated(unsafe) var historyObserver: NSObjectProtocol?
     fileprivate let sessionState = CaptureLibrarySessionState()
+    private var hostingView: NSHostingView<CaptureLibraryView>?
 
     static func show() {
         DispatchQueue.main.async {
@@ -83,7 +84,13 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
                 CaptureLibraryWindow.open(entry)
             }
         )
+        if let hostingView {
+            // Update in place so List scroll position and @State selection survive.
+            hostingView.rootView = view
+            return
+        }
         let hostingView = NSHostingView(rootView: view)
+        self.hostingView = hostingView
         layoutLibraryContent(hostingView)
     }
 
@@ -156,6 +163,7 @@ private struct CaptureRowSuggestionState {
     var isLoading = false
     var suggestion: RenameSuggestion?
     var selectedProject: String?
+    var selectedFlow: String?
     var acceptedSnapshot: CaptureLocationSnapshot?
     var wroteMapping = false
     var windowInfo: WindowSignature?
@@ -168,9 +176,22 @@ private struct CaptureRowSuggestionState {
         return suggestion?.suggestedProject
     }
 
+    var effectiveFlow: String? {
+        if let selectedFlow,
+           !selectedFlow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return selectedFlow
+        }
+        return suggestion?.suggestedFlow
+    }
+
     var showsProjectPicker: Bool {
         guard suggestion != nil else { return false }
         return suggestion?.hasProject == true || effectiveProject != nil
+    }
+
+    var showsFlowPicker: Bool {
+        guard suggestion != nil else { return false }
+        return suggestion?.hasFlow == true || effectiveFlow != nil
     }
 }
 
@@ -214,6 +235,8 @@ private struct CaptureLibraryView: View {
     @State private var renameDraft = ""
     @State private var createProjectTarget: UUID?
     @State private var createProjectDraft = ""
+    @State private var createFlowTarget: UUID?
+    @State private var createFlowDraft = ""
     /// Groups start collapsed; membership means the section is expanded.
     @State private var expandedGroupIDs = Set<String>()
 
@@ -284,6 +307,21 @@ private struct CaptureLibraryView: View {
                 createProjectTarget = nil
             }
         }
+        .alert("Custom Flow", isPresented: createFlowAlertBinding) {
+            TextField("Flow name", text: $createFlowDraft)
+            Button("Cancel", role: .cancel) {
+                createFlowTarget = nil
+            }
+            Button("Create") {
+                if let targetID = createFlowTarget {
+                    let name = CaptureTag.normalizeName(createFlowDraft)
+                    if !name.isEmpty {
+                        setFlow(name, for: targetID)
+                    }
+                }
+                createFlowTarget = nil
+            }
+        }
         .onAppear {
             resetVisibleWindow()
             if selection.isEmpty, let first = entries.first {
@@ -320,7 +358,15 @@ private struct CaptureLibraryView: View {
                     description: Text("Screenshots and recordings will appear here.")
                 )
             } else {
-                captureList
+                VStack(spacing: 0) {
+                    groupByPicker
+                        .padding(.horizontal, DesignTokens.Spacing.md)
+                        .padding(.top, DesignTokens.Spacing.sm)
+                        .padding(.bottom, DesignTokens.Spacing.xs)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    captureList
+                }
             }
         }
         .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 380)
@@ -406,13 +452,6 @@ private struct CaptureLibraryView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(DesignTokens.Color.background.swiftUI)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            groupByPicker
-                .padding(.horizontal, DesignTokens.Spacing.md)
-                .padding(.top, DesignTokens.Spacing.sm)
-                .padding(.bottom, DesignTokens.Spacing.xs)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
     }
 
     private func projectGroupHeader(for group: CaptureLibraryProjectGroup) -> some View {
@@ -457,7 +496,9 @@ private struct CaptureLibraryView: View {
                 onDismissSuggestion: { dismissSuggestion(for: $0) },
                 onRevertSuggestion: { revertSuggestion(for: $0) },
                 onSelectProject: { setProject($0, for: $1) },
-                onCreateProject: { beginCreateProject(for: $0) }
+                onCreateProject: { beginCreateProject(for: $0) },
+                onSelectFlow: { setFlow($0, for: $1) },
+                onCreateFlow: { beginCreateFlow(for: $0) }
             )
         } else if let entry = selectedEntry {
             CapturePreviewPane(
@@ -467,6 +508,10 @@ private struct CaptureLibraryView: View {
                 onAutoTag: { requestSuggestion(for: entry) },
                 onAcceptSuggestion: { acceptSuggestion(for: entry) },
                 onDismissSuggestion: { dismissSuggestion(for: entry) },
+                onSelectProject: { setProject($0, for: entry.id) },
+                onCreateProject: { beginCreateProject(for: entry.id) },
+                onSelectFlow: { setFlow($0, for: entry.id) },
+                onCreateFlow: { beginCreateFlow(for: entry.id) },
                 onRemoveTag: { tag in
                     if entry.tags.contains(where: { $0.id == tag.id }) {
                         _ = CaptureHistory.shared.removeTag(id: entry.id, tagID: tag.id)
@@ -527,20 +572,24 @@ private struct CaptureLibraryView: View {
         }
     }
 
-    @ViewBuilder
     private func listRowBackground(isSelected: Bool) -> some View {
-        if isSelected {
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
-        } else {
-            Color.clear
-        }
+        // Same view type always — swapping Clear ↔ RoundedRectangle on select
+        // can nudge List layout/scroll during selection changes.
+        RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+            .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(isSelected ? 1 : 0))
     }
 
     private var createProjectAlertBinding: Binding<Bool> {
         Binding(
             get: { createProjectTarget != nil },
             set: { if !$0 { createProjectTarget = nil } }
+        )
+    }
+
+    private var createFlowAlertBinding: Binding<Bool> {
+        Binding(
+            get: { createFlowTarget != nil },
+            set: { if !$0 { createFlowTarget = nil } }
         )
     }
 
@@ -575,9 +624,20 @@ private struct CaptureLibraryView: View {
         createProjectDraft = sessionState.rowStates[id]?.effectiveProject ?? ""
     }
 
+    private func beginCreateFlow(for id: UUID) {
+        createFlowTarget = id
+        createFlowDraft = sessionState.rowStates[id]?.effectiveFlow ?? ""
+    }
+
     private func setProject(_ project: String, for id: UUID) {
         updateRowState(id) { state in
             state.selectedProject = project
+        }
+    }
+
+    private func setFlow(_ flow: String, for id: UUID) {
+        updateRowState(id) { state in
+            state.selectedFlow = flow
         }
     }
 
@@ -632,6 +692,7 @@ private struct CaptureLibraryView: View {
             state.isLoading = true
             state.suggestion = nil
             state.selectedProject = nil
+            state.selectedFlow = nil
             state.acceptedSnapshot = nil
             state.wroteMapping = false
             state.windowInfo = windowInfo
@@ -645,6 +706,7 @@ private struct CaptureLibraryView: View {
                     state.isLoading = false
                     state.suggestion = suggestion
                     state.selectedProject = suggestion?.suggestedProject
+                    state.selectedFlow = suggestion?.suggestedFlow
                     state.windowInfo = windowInfo
                 }
             }
@@ -661,7 +723,7 @@ private struct CaptureLibraryView: View {
         let effectiveSuggestion = RenameSuggestion(
             suggestedName: suggestion.suggestedName,
             suggestedProject: state.effectiveProject,
-            suggestedFlow: suggestion.suggestedFlow,
+            suggestedFlow: state.effectiveFlow,
             suggestedComponents: suggestion.suggestedComponents,
             confidence: suggestion.confidence
         )
@@ -677,6 +739,7 @@ private struct CaptureLibraryView: View {
             row.wroteMapping = effectiveSuggestion.hasProject && row.windowInfo != nil
             row.suggestion = nil
             row.selectedProject = nil
+            row.selectedFlow = nil
             row.isLoading = false
         }
     }
@@ -685,6 +748,7 @@ private struct CaptureLibraryView: View {
         updateRowState(entry.id) { state in
             state.suggestion = nil
             state.selectedProject = nil
+            state.selectedFlow = nil
             state.isLoading = false
         }
     }
@@ -851,6 +915,66 @@ private enum CaptureLibraryProject {
     }
 }
 
+/// Dropdown chip for editing a suggested project/flow before confirming Auto-Tag.
+private struct SuggestionTagMenu: View {
+    let kind: CaptureTagKind
+    let selected: String
+    let options: [String]
+    var emphasized: Bool = false
+    let onSelect: (String) -> Void
+    let onCreateNew: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(kind.displayName)
+                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
+
+            Menu {
+                ForEach(options, id: \.self) { name in
+                    Button(name) {
+                        onSelect(name)
+                    }
+                }
+
+                if !options.isEmpty {
+                    Divider()
+                }
+
+                Button("Custom…") {
+                    onCreateNew()
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(selected)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                }
+                .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(emphasized ? 0.85 : 0.7))
+                .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+        }
+        .font(.snipsnap(.caption))
+        .padding(.horizontal, DesignTokens.Spacing.sm)
+        .padding(.vertical, emphasized ? 5 : 3)
+        .background(
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
+                .overlay {
+                    if emphasized {
+                        RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                            .strokeBorder(DesignTokens.Color.primary.swiftUI.opacity(0.3), lineWidth: 1)
+                    }
+                }
+        )
+        .help("Change \(kind.displayName.lowercased())")
+    }
+}
+
 private struct CaptureMultiSelectPane: View {
     let entries: [CaptureEntry]
     let rowStates: [UUID: CaptureRowSuggestionState]
@@ -860,6 +984,8 @@ private struct CaptureMultiSelectPane: View {
     let onRevertSuggestion: (CaptureEntry) -> Void
     let onSelectProject: (String, UUID) -> Void
     let onCreateProject: (UUID) -> Void
+    let onSelectFlow: (String, UUID) -> Void
+    let onCreateFlow: (UUID) -> Void
 
     private var isAnyLoading: Bool {
         entries.contains { rowStates[$0.id]?.isLoading == true }
@@ -953,11 +1079,29 @@ private struct CaptureMultiSelectPane: View {
             )
 
             if rowState.showsProjectPicker, let project = rowState.effectiveProject {
-                pendingProjectMenu(entryID: entry.id, selectedProject: project, rowState: rowState)
+                SuggestionTagMenu(
+                    kind: .project,
+                    selected: project,
+                    options: projectOptions(for: rowState),
+                    emphasized: false,
+                    onSelect: { onSelectProject($0, entry.id) },
+                    onCreateNew: { onCreateProject(entry.id) }
+                )
             } else if let project = rowState.effectiveProject {
                 metaChip(label: "Tag", value: project)
             } else if rowState.acceptedSnapshot != nil {
                 metaChip(label: "Tag", value: "Organized")
+            }
+
+            if rowState.showsFlowPicker, let flow = rowState.effectiveFlow {
+                SuggestionTagMenu(
+                    kind: .flow,
+                    selected: flow,
+                    options: flowOptions(for: rowState),
+                    emphasized: false,
+                    onSelect: { onSelectFlow($0, entry.id) },
+                    onCreateNew: { onCreateFlow(entry.id) }
+                )
             }
         }
     }
@@ -978,57 +1122,17 @@ private struct CaptureMultiSelectPane: View {
         )
     }
 
-    private func pendingProjectMenu(
-        entryID: UUID,
-        selectedProject: String,
-        rowState: CaptureRowSuggestionState
-    ) -> some View {
-        HStack(spacing: 4) {
-            Text("Tag")
-                .font(.snipsnap(.caption))
-                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-
-            Menu {
-                ForEach(projectOptions(for: rowState), id: \.self) { project in
-                    Button(project) {
-                        onSelectProject(project, entryID)
-                    }
-                }
-
-                if !projectOptions(for: rowState).isEmpty {
-                    Divider()
-                }
-
-                Button("Create New…") {
-                    onCreateProject(entryID)
-                }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(selectedProject)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                }
-                .font(.snipsnap(.caption))
-                .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(0.7))
-                .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-        }
-        .padding(.horizontal, DesignTokens.Spacing.sm)
-        .padding(.vertical, 3)
-        .background(
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
-        )
-    }
-
     private func projectOptions(for rowState: CaptureRowSuggestionState) -> [String] {
         var names = Set(CaptureLibraryOrganizer.existingProjectNames())
         if let effective = rowState.effectiveProject {
+            names.insert(effective)
+        }
+        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func flowOptions(for rowState: CaptureRowSuggestionState) -> [String] {
+        var names = Set(CaptureLibraryOrganizer.existingTagNames(kind: .flow))
+        if let effective = rowState.effectiveFlow {
             names.insert(effective)
         }
         return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
@@ -1083,6 +1187,10 @@ private struct CapturePreviewPane: View {
     let onAutoTag: () -> Void
     let onAcceptSuggestion: () -> Void
     let onDismissSuggestion: () -> Void
+    let onSelectProject: (String) -> Void
+    let onCreateProject: () -> Void
+    let onSelectFlow: (String) -> Void
+    let onCreateFlow: () -> Void
     let onRemoveTag: (CaptureTag) -> Void
     let onAddTag: (CaptureTagKind, String) -> Void
 
@@ -1095,6 +1203,22 @@ private struct CapturePreviewPane: View {
 
     private var showsAutoTagOverlay: Bool {
         rowState.isLoading || rowState.suggestion != nil
+    }
+
+    private var projectOptions: [String] {
+        var names = Set(CaptureLibraryOrganizer.existingProjectNames())
+        if let effective = rowState.effectiveProject {
+            names.insert(effective)
+        }
+        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private var flowOptions: [String] {
+        var names = Set(CaptureLibraryOrganizer.existingTagNames(kind: .flow))
+        if let effective = rowState.effectiveFlow {
+            names.insert(effective)
+        }
+        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     var body: some View {
@@ -1191,13 +1315,27 @@ private struct CapturePreviewPane: View {
                         }
                     }
 
-                    if suggestion.hasTags {
+                    if suggestion.hasTags || rowState.showsProjectPicker || rowState.showsFlowPicker {
                         FlowLayoutCentered(spacing: DesignTokens.Spacing.sm) {
-                            if suggestion.hasProject, let project = suggestion.suggestedProject {
-                                suggestedTagChip(kind: .project, name: project)
+                            if rowState.showsProjectPicker, let project = rowState.effectiveProject {
+                                SuggestionTagMenu(
+                                    kind: .project,
+                                    selected: project,
+                                    options: projectOptions,
+                                    emphasized: true,
+                                    onSelect: onSelectProject,
+                                    onCreateNew: onCreateProject
+                                )
                             }
-                            if suggestion.hasFlow, let flow = suggestion.suggestedFlow {
-                                suggestedTagChip(kind: .flow, name: flow)
+                            if rowState.showsFlowPicker, let flow = rowState.effectiveFlow {
+                                SuggestionTagMenu(
+                                    kind: .flow,
+                                    selected: flow,
+                                    options: flowOptions,
+                                    emphasized: true,
+                                    onSelect: onSelectFlow,
+                                    onCreateNew: onCreateFlow
+                                )
                             }
                             ForEach(suggestion.suggestedComponents, id: \.self) { component in
                                 suggestedTagChip(kind: .component, name: component)

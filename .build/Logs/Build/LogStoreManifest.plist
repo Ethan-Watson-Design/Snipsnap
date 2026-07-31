@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>31F645D7-0455-42D5-9DCB-232BB77B033A</key>
+		<key>047C3BD4-B58C-405C-9D2C-A17A023EEFD7</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,13 +15,13 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>31F645D7-0455-42D5-9DCB-232BB77B033A.xcactivitylog</string>
+			<string>047C3BD4-B58C-405C-9D2C-A17A023EEFD7.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
 			<dict>
 				<key>highLevelStatus</key>
-				<string>S</string>
+				<string>W</string>
 				<key>totalNumberOfAnalyzerIssues</key>
 				<integer>0</integer>
 				<key>totalNumberOfErrors</key>
@@ -29,7 +29,7 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>0</integer>
+				<integer>10</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>Snipsnap project</string>
@@ -40,13 +40,223 @@
 			<key>signature</key>
 			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>804311270.53496802</real>
+			<real>807198169.37024605</real>
 			<key>timeStoppedRecording</key>
-			<real>804311290.12870896</real>
+			<real>807198193.33576202</real>
 			<key>title</key>
 			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>31F645D7-0455-42D5-9DCB-232BB77B033A</string>
+			<string>047C3BD4-B58C-405C-9D2C-A17A023EEFD7</string>
+		</dict>
+		<key>3BDEB13C-33C9-47FE-91B7-2BB53EE63D8B</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>3BDEB13C-33C9-47FE-91B7-2BB53EE63D8B.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>10</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Snipsnap project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Snipsnap</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>807198263.73310804</real>
+			<key>timeStoppedRecording</key>
+			<real>807198265.83989704</real>
+			<key>title</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>3BDEB13C-33C9-47FE-91B7-2BB53EE63D8B</string>
+		</dict>
+		<key>3C06F09C-231E-4F41-84BA-4CEFA30139EE</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>3C06F09C-231E-4F41-84BA-4CEFA30139EE.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>11</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>10</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Snipsnap project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Snipsnap</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>807197696.01291096</real>
+			<key>timeStoppedRecording</key>
+			<real>807197702.10336804</real>
+			<key>title</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>3C06F09C-231E-4F41-84BA-4CEFA30139EE</string>
+		</dict>
+		<key>449A431D-91C2-4784-B9CE-BAB2A6CB22C5</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>449A431D-91C2-4784-B9CE-BAB2A6CB22C5.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>W</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>0</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>10</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Snipsnap project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Snipsnap</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>807197732.69439602</real>
+			<key>timeStoppedRecording</key>
+			<real>807197741.57094395</real>
+			<key>title</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>449A431D-91C2-4784-B9CE-BAB2A6CB22C5</string>
+		</dict>
+		<key>51190407-AF79-458C-BECD-E952AB0DE931</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>51190407-AF79-458C-BECD-E952AB0DE931.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>11</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>10</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Snipsnap project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Snipsnap</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>807197719.19874096</real>
+			<key>timeStoppedRecording</key>
+			<real>807197724.80495405</real>
+			<key>title</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>51190407-AF79-458C-BECD-E952AB0DE931</string>
+		</dict>
+		<key>8E685C6F-B615-438E-8CB4-50F60E55B17F</key>
+		<dict>
+			<key>className</key>
+			<string>IDECommandLineBuildLog</string>
+			<key>documentTypeString</key>
+			<string>&lt;nil&gt;</string>
+			<key>domainType</key>
+			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
+			<key>fileName</key>
+			<string>8E685C6F-B615-438E-8CB4-50F60E55B17F.xcactivitylog</string>
+			<key>hasPrimaryLog</key>
+			<true/>
+			<key>primaryObservable</key>
+			<dict>
+				<key>highLevelStatus</key>
+				<string>E</string>
+				<key>totalNumberOfAnalyzerIssues</key>
+				<integer>0</integer>
+				<key>totalNumberOfErrors</key>
+				<integer>11</integer>
+				<key>totalNumberOfTestFailures</key>
+				<integer>0</integer>
+				<key>totalNumberOfWarnings</key>
+				<integer>10</integer>
+			</dict>
+			<key>schemeIdentifier-containerName</key>
+			<string>Snipsnap project</string>
+			<key>schemeIdentifier-schemeName</key>
+			<string>Snipsnap</string>
+			<key>schemeIdentifier-sharedScheme</key>
+			<integer>1</integer>
+			<key>signature</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>timeStartedRecording</key>
+			<real>807197707.59149802</real>
+			<key>timeStoppedRecording</key>
+			<real>807197713.14610505</real>
+			<key>title</key>
+			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<key>uniqueIdentifier</key>
+			<string>8E685C6F-B615-438E-8CB4-50F60E55B17F</string>
 		</dict>
 	</dict>
 </dict>

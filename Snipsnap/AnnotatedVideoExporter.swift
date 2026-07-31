@@ -253,9 +253,10 @@ enum AnnotatedVideoExporter {
                     at: time,
                     from: zoomAnnotations,
                     outputSize: outputSize,
-                    canvasSize: canvasSize
+                    canvasSize: canvasSize,
+                    mediaSize: outputSize
                 )
-                if abs(zoom.scale - 1) > 0.001 {
+                if abs(zoom.scale - 1) > 0.001 || zoom.panProgress > 0.001 {
                     ciImage = ZoomEffect.applyZoom(to: ciImage, zoom: zoom, outputSize: outputSize)
                 }
 

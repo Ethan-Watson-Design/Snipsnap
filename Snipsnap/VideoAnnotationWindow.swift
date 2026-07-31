@@ -54,7 +54,7 @@ final class VideoTimelineView: NSView {
 
     private let trackHeight: CGFloat = 8
     private let handleWidth: CGFloat = 6
-    private let minDuration: Double = 1
+    private let minDuration: Double = 0.05
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -229,14 +229,9 @@ final class VideoTimelineView: NSView {
         case .resizeEnd:
             let newEnd = max((selectionStartTime ?? 0) + minDuration, min(timeForX(point.x, in: track), videoDuration))
             let start = selectionStartTime ?? 0
-            if newEnd >= videoDuration - 0.25 {
-                selectionVisibleDuration = nil
-                onSelectionDurationChanged?(nil)
-            } else {
-                let newDuration = newEnd - start
-                selectionVisibleDuration = newDuration
-                onSelectionDurationChanged?(newDuration)
-            }
+            let newDuration = newEnd - start
+            selectionVisibleDuration = newDuration
+            onSelectionDurationChanged?(newDuration)
             needsDisplay = true
 
         case .none:
@@ -590,11 +585,16 @@ final class VideoAnnotationWindow: NSWindow {
         playerView.zoomAnnotationsProvider = { [weak self] in
             self?.canvas.annotations ?? []
         }
+        playerView.prefersRawVideoForZoomEditing = { [weak self] in
+            self?.canvas.prefersRawVideoForZoomEditing ?? false
+        }
         playerView.canvasSize = canvas.bounds.size
 
         canvas.onSelectionChanged = { [weak self] index in
             self?.updateTimelineSelection(for: index)
             self?.updateToolbarAccessoryControls()
+            self?.playerView.canvasSize = self?.canvas.bounds.size ?? .zero
+            self?.playerView.updateZoomPreview()
         }
 
         timeline.onSeek = { [weak self] time in
@@ -605,6 +605,7 @@ final class VideoAnnotationWindow: NSWindow {
             guard let self else { return }
             self.isScrubbing = true
             self.canvas.isScrubbing = true
+            self.canvas.cancelZoomGeometryDrag()
             self.playerView.isScrubbing = true
             self.playerView.setContinuousUpdatesEnabled(true)
         }
@@ -622,6 +623,8 @@ final class VideoAnnotationWindow: NSWindow {
         timeline.onSelectionStartChanged = { [weak self] startTime in
             guard let self, let index = canvas.selectedIndex else { return }
             canvas.setStartTime(for: index, seconds: startTime, recordingDuration: videoDuration)
+            self.updateTimelineSelection(for: index)
+            self.playerView.updateZoomPreview()
         }
 
         timeline.onSelectionDurationChanged = { [weak self] duration in
@@ -631,22 +634,32 @@ final class VideoAnnotationWindow: NSWindow {
             } else {
                 canvas.setForever(for: index, forever: true)
             }
+            self.updateTimelineSelection(for: index)
+            self.playerView.updateZoomPreview()
         }
 
         canvas.onWillDraw = { [weak self] in
-            guard let self, self.player.timeControlStatus == .playing else { return }
-            self.player.pause()
+            self?.pauseForZoomEditingIfNeeded()
         }
 
         canvas.onToolChanged = { [weak self] tool in
-            self?.pill.selectedTool = tool
-            self?.updateToolbarAccessoryControls()
+            guard let self else { return }
+            if tool == .zoom {
+                self.pauseForZoomEditingIfNeeded()
+            }
+            self.pill.selectedTool = tool
+            self.updateToolbarAccessoryControls()
+            self.playerView.updateZoomPreview()
+            self.canvas.needsDisplay = true
         }
 
         canvas.onSelectionGeometryChanged = { [weak self] in
-            guard let self,
-                  let settings = self.canvas.spotlightSettingsForEditing() else { return }
-            self.pill.syncSpotlightOptionsPanelRegion(settings.region)
+            guard let self else { return }
+            self.playerView.canvasSize = self.canvas.bounds.size
+            self.playerView.updateZoomPreview()
+            if let settings = self.canvas.spotlightSettingsForEditing() {
+                self.pill.syncSpotlightOptionsPanelRegion(settings.region)
+            }
         }
 
         canvas.onEscapeAction = { [weak self] in
@@ -663,9 +676,14 @@ final class VideoAnnotationWindow: NSWindow {
 
         pill.onToolSelected = { [weak self] tool in
             guard let self else { return }
+            if tool == .zoom {
+                pauseForZoomEditingIfNeeded()
+            }
             canvas.selectedTool = tool
             pill.selectedTool = tool
             updateToolbarAccessoryControls()
+            playerView.updateZoomPreview()
+            canvas.needsDisplay = true
         }
 
         pill.onColorSelected = { [weak self] color in
@@ -746,6 +764,16 @@ final class VideoAnnotationWindow: NSWindow {
                 self.updatePlayPauseButton(playing: playing)
                 self.canvas.isPlaybackActive = playing
                 self.playerView.isPlaybackActive = playing
+                if playing {
+                    self.canvas.cancelZoomGeometryDrag()
+                    // Drop active zoom selection chrome — play only shows the
+                    // fixed dashed border and zooms into that recording rect.
+                    if let idx = self.canvas.selectedIndex,
+                       self.canvas.annotations.indices.contains(idx),
+                       case .zoom = self.canvas.annotations[idx].content {
+                        self.canvas.clearSelectionForPlayback()
+                    }
+                }
                 self.playerView.setContinuousUpdatesEnabled(playing || self.isScrubbing)
                 self.playerView.updateZoomPreview()
                 self.canvas.needsDisplay = true
@@ -762,13 +790,23 @@ final class VideoAnnotationWindow: NSWindow {
                   let tracks = try? await tracksLoad,
                   let videoTrack = tracks.first(where: { $0.mediaType == .video }) else { return }
             let naturalSize = try? await videoTrack.load(.naturalSize)
+            let preferred = (try? await videoTrack.load(.preferredTransform)) ?? .identity
             let total = CMTimeGetSeconds(duration)
+            var mediaSize = CGSize.zero
+            if let naturalSize, naturalSize.width > 0, naturalSize.height > 0 {
+                let transformed = naturalSize.applying(preferred)
+                mediaSize = CGSize(width: abs(transformed.width), height: abs(transformed.height))
+            }
             await MainActor.run {
                 guard total.isFinite, total > 0 else { return }
                 self.videoDuration = total
                 self.timeline.videoDuration = total
-                if let naturalSize, naturalSize.width > 0, naturalSize.height > 0 {
-                    self.videoNaturalSize = naturalSize
+                self.canvas.videoDuration = total
+                if mediaSize.width > 0, mediaSize.height > 0 {
+                    self.videoNaturalSize = mediaSize
+                    self.canvas.videoAspectRatio = mediaSize.width / mediaSize.height
+                    self.playerView.mediaSize = mediaSize
+                    self.playerView.updateZoomPreview()
                     self.updateSpotlightCoordinateMapping()
                 }
             }
@@ -796,6 +834,7 @@ final class VideoAnnotationWindow: NSWindow {
                 guard total.isFinite, total > 0 else { return }
                 self.videoDuration = total
                 self.timeline.videoDuration = total
+                self.canvas.videoDuration = total
                 self.updatePlaybackTime(current, total: total)
             }
         }
@@ -807,6 +846,19 @@ final class VideoAnnotationWindow: NSWindow {
         } else {
             player.play()
         }
+    }
+
+    /// Pause and immediately show the full unzoomed frame so zoom selection
+    /// is relative to the overall recording, not the currently zoomed view.
+    private func pauseForZoomEditingIfNeeded() {
+        if player.timeControlStatus == .playing {
+            player.pause()
+        }
+        // Don't wait for KVO — drop the zoom transform right away.
+        canvas.isPlaybackActive = false
+        playerView.isPlaybackActive = false
+        playerView.updateZoomPreview()
+        canvas.needsDisplay = true
     }
 
     private func seekTo(_ seconds: Double) {

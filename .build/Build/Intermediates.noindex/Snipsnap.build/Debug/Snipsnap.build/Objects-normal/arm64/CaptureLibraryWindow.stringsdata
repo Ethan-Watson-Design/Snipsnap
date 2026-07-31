@@ -1,0 +1,296 @@
+{
+  "source": "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/CaptureLibraryWindow.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "New Project",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 297
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom Flow",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 310
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose a screenshot or recording from the sidebar.",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 530
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select a Capture",
+        "location": {
+          "startingColumn": 17,
+          "startingLine": 528
+        }
+      },
+      {
+        "comment": "",
+        "key": "Project name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 298
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 299
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 302
+        }
+      },
+      {
+        "comment": "",
+        "key": "Flow name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 311
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 312
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 315
+        }
+      },
+      {
+        "comment": "",
+        "key": "Screenshots and recordings will appear here.",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 358
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Captures Yet",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 356
+        }
+      },
+      {
+        "comment": "",
+        "key": "Group captures in the sidebar",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 424
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Rename",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 380
+        }
+      },
+      {
+        "comment": "",
+        "key": "Organize",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 388
+        }
+      },
+      {
+        "comment": "",
+        "key": "Group",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 410
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move to Trash",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 569
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Rename",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 556
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show in Finder",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 561
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rename",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 566
+        }
+      },
+      {
+        "comment": "",
+        "key": "Name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 850
+        }
+      },
+      {
+        "comment": "",
+        "key": "Organized",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 889
+        }
+      },
+      {
+        "comment": "",
+        "key": "Revert rename and move",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 898
+        }
+      },
+      {
+        "comment": "",
+        "key": "Change %@",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 974
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom…",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 943
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld selected",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1023
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 1017
+        }
+      },
+      {
+        "comment": "",
+        "key": "Revert rename and move",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 1178
+        }
+      },
+      {
+        "comment": "",
+        "key": "Accept suggestion",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1157
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dismiss suggestion",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1167
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1235
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annotate",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 1268
+        }
+      },
+      {
+        "comment": "",
+        "key": "No tags suggested",
+        "location": {
+          "startingColumn": 30,
+          "startingLine": 1346
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rename",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 1308
+        }
+      },
+      {
+        "comment": "",
+        "key": "Confirm",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1355
+        }
+      },
+      {
+        "comment": "",
+        "key": "Reject",
+        "location": {
+          "startingColumn": 35,
+          "startingLine": 1363
+        }
+      }
+    ]
+  },
+  "version": 1
+}

@@ -54,7 +54,7 @@ enum AnnotationTool: Hashable {
         .select, .spotlight, .crop, .text, .emoji
     ]
     static let videoTools: [AnnotationTool] = [
-        .zoom, .text
+        .select, .zoom, .text
     ]
 
     var sfSymbol: String {
@@ -814,6 +814,10 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     var videoMode: Bool = false
     /// Current video playback time — drives visibility filtering in video mode.
     var playbackTime: Double = 0
+    /// Total video length in seconds (video mode). Used to clamp annotation end times.
+    var videoDuration: Double = 0
+    /// Recording width/height. When > 0, zoom selections lock to this aspect ratio.
+    var videoAspectRatio: CGFloat = 0
     /// When true, zoom overlays are hidden and zoom is applied to the video layer instead.
     var isPlaybackActive: Bool = false
     /// When true, scrubbing the timeline — same live zoom behavior as playback.
@@ -909,14 +913,89 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         let start = videoMode ? playbackTime : 0
         var placed = PlacedAnnotation(content: content, startTime: start)
         if videoMode, case .zoom = content {
-            placed.visibleDuration = 4
+            // Only one zoom at a time — end earlier zooms and replace any at this playhead.
+            annotations.removeAll {
+                guard case .zoom = $0.content else { return false }
+                return abs($0.startTime - start) < 0.05
+            }
+            endOverlappingZooms(before: start)
+            // Span from the placement time to the end of the video — never past it.
+            if videoDuration.isFinite, videoDuration > start {
+                placed.visibleDuration = videoDuration - start
+            } else {
+                placed.visibleDuration = nil
+            }
         }
         annotations.append(placed)
+        if videoMode, case .zoom = content {
+            resolveZoomOverlaps()
+        }
         if videoMode {
             setSelectedIndex(annotations.count - 1)
         }
         if case .crop = content {
             notifyCommittedCropPreviewIfNeeded()
+        }
+    }
+
+    /// Caps any zoom that extends past `newStart` so it ends exactly there.
+    private func endOverlappingZooms(before newStart: Double, excluding excludedIndex: Int? = nil) {
+        for i in annotations.indices {
+            if i == excludedIndex { continue }
+            guard case .zoom = annotations[i].content else { continue }
+            let zStart = annotations[i].startTime
+            guard zStart < newStart else { continue }
+            let overlaps: Bool
+            if let duration = annotations[i].visibleDuration {
+                overlaps = zStart + duration > newStart
+            } else {
+                overlaps = true
+            }
+            guard overlaps else { continue }
+            annotations[i].visibleDuration = max(0.05, newStart - zStart)
+        }
+    }
+
+    /// Ensures zoom ranges never overlap: earlier zooms end when the next zoom starts.
+    private func resolveZoomOverlaps() {
+        let zoomIndices = annotations.indices.filter {
+            if case .zoom = annotations[$0].content { return true }
+            return false
+        }.sorted { annotations[$0].startTime < annotations[$1].startTime }
+
+        guard zoomIndices.count > 1 else { return }
+
+        var remove: Set<Int> = []
+        for i in 0..<(zoomIndices.count - 1) {
+            let earlier = zoomIndices[i]
+            let later = zoomIndices[i + 1]
+            let laterStart = annotations[later].startTime
+            let earlierStart = annotations[earlier].startTime
+            if laterStart <= earlierStart {
+                remove.insert(earlier)
+                continue
+            }
+            if let duration = annotations[earlier].visibleDuration {
+                if earlierStart + duration > laterStart {
+                    annotations[earlier].visibleDuration = laterStart - earlierStart
+                }
+            } else {
+                annotations[earlier].visibleDuration = laterStart - earlierStart
+            }
+        }
+        if !remove.isEmpty {
+            let selected = selectedIndex
+            annotations = annotations.enumerated().compactMap { offset, placed in
+                remove.contains(offset) ? nil : placed
+            }
+            if let selected {
+                if remove.contains(selected) {
+                    setSelectedIndex(nil)
+                } else {
+                    let shifted = selected - remove.filter { $0 < selected }.count
+                    setSelectedIndex(shifted)
+                }
+            }
         }
     }
 
@@ -979,19 +1058,25 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         if forever {
             annotations[index].visibleDuration = nil
         } else {
-            annotations[index].visibleDuration = max(1, annotations[index].visibleDuration ?? 5)
+            annotations[index].visibleDuration = max(0.05, annotations[index].visibleDuration ?? 5)
+        }
+        if case .zoom = annotations[index].content {
+            resolveZoomOverlaps()
         }
         needsDisplay = true
     }
 
     func setStartTime(for index: Int, seconds: Double, recordingDuration: Double) {
         guard annotations.indices.contains(index) else { return }
-        let maxStart = max(0, floor(recordingDuration))
-        let start = max(0, min(seconds.rounded(), maxStart))
+        let maxStart = max(0, recordingDuration)
+        let start = max(0, min(seconds, maxStart))
         annotations[index].startTime = start
         if let duration = annotations[index].visibleDuration {
-            let maxDuration = max(1, floor(recordingDuration) - start)
+            let maxDuration = max(0.05, recordingDuration - start)
             annotations[index].visibleDuration = min(duration, maxDuration)
+        }
+        if case .zoom = annotations[index].content {
+            resolveZoomOverlaps()
         }
         needsDisplay = true
     }
@@ -1000,9 +1085,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         guard annotations.indices.contains(index) else { return }
         let start = annotations[index].startTime
         let maxDuration = recordingDuration.isFinite
-            ? max(1, floor(recordingDuration) - start)
+            ? max(0.05, recordingDuration - start)
             : seconds
-        annotations[index].visibleDuration = max(1, min(seconds.rounded(), maxDuration))
+        annotations[index].visibleDuration = max(0.05, min(seconds, maxDuration))
+        if case .zoom = annotations[index].content {
+            resolveZoomOverlaps()
+        }
         needsDisplay = true
     }
 
@@ -1013,9 +1101,57 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
 
     // MARK: Drawing
 
-    private func shouldRenderOverlay(for content: Annotation) -> Bool {
-        if videoMode, (isPlaybackActive || isScrubbing), case .zoom = content { return false }
-        return true
+    private func shouldRenderOverlay(for content: Annotation, isCurrent: Bool = false) -> Bool {
+        guard videoMode, case .zoom = content else { return true }
+        // Playing / scrubbing: player applies the zoom transform — hide the region.
+        if isPlaybackActive || isScrubbing { return false }
+        // In-progress placement: always show the drag border on the raw frame.
+        if isCurrent { return true }
+        // Paused: show the region only when it is selected for editing (raw video).
+        // Otherwise the settled zoom preview is on the player and the overlay would drift.
+        guard let idx = selectedIndex, annotations.indices.contains(idx),
+              case let .zoom(selectedRect) = annotations[idx].content,
+              case let .zoom(rect) = content else {
+            return false
+        }
+        return selectedRect == rect
+    }
+
+    /// When true, preview leaves the video unzoomed so zoom selection is always
+    /// relative to the full recording frame (never the currently zoomed view).
+    var prefersRawVideoForZoomEditing: Bool {
+        guard videoMode else { return false }
+        // Placing / about to place: always show the full unzoomed recording.
+        if selectedTool == .zoom { return true }
+        if case .zoom = currentAnnotation { return true }
+        // Editing an existing zoom: only while paused (not during play/scrub).
+        guard !isPlaybackActive, !isScrubbing else { return false }
+        guard let idx = selectedIndex, annotations.indices.contains(idx),
+              case .zoom = annotations[idx].content else { return false }
+        return annotations[idx].isVisible(at: playbackTime)
+    }
+
+    /// Zoom regions are fixed to the full frame — no move/resize while playing.
+    private var allowsZoomGeometryEditing: Bool {
+        !videoMode || (!isPlaybackActive && !isScrubbing)
+    }
+
+    /// Cancels an in-progress select drag of a zoom region (e.g. when play starts).
+    func cancelZoomGeometryDrag() {
+        guard let idx = selectedIndex,
+              annotations.indices.contains(idx),
+              case .zoom = annotations[idx].content else { return }
+        selectDragMode = .none
+        selectDragSavedState = nil
+        selectDidDrag = false
+    }
+
+    /// Clears annotation selection when playback starts so only the fixed dashed
+    /// zoom border is shown (no active select handles on the canvas).
+    func clearSelectionForPlayback() {
+        cancelZoomGeometryDrag()
+        setSelectedIndex(nil)
+        needsDisplay = true
     }
 
     private func committedCropRect() -> CGRect? {
@@ -1059,7 +1195,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 }
             }
         }
-        if let cur = currentAnnotation, shouldRenderOverlay(for: cur) {
+        if let cur = currentAnnotation, shouldRenderOverlay(for: cur, isCurrent: true) {
             if case .spotlight = cur {
                 // Already drawn in the spotlight pass.
             } else {
@@ -1075,6 +1211,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             let content = annotations[idx].content
             if case .crop = content {
                 // Crop is edited via the crop tool, not select handles.
+            } else if case .zoom = content, isPlaybackActive || isScrubbing {
+                // During play/scrub the player zooms into the fixed dashed border —
+                // don't draw the separate active selection handles on the canvas.
             } else {
             switch content {
             case let .arrow(from, to, bend, _, _, pathStyle, seed):
@@ -1794,6 +1933,17 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         needsDisplay = true
     }
 
+    private func commitPlacedZoom(_ content: Annotation) {
+        appendAnnotation(content)
+        currentAnnotation = nil
+        setSelectedIndex(annotations.count - 1)
+        if allowedTools.contains(.select) {
+            selectedTool = .select
+            onToolChanged?(.select)
+        }
+        needsDisplay = true
+    }
+
     /// Whether the toolbar should show spotlight controls instead of the color swatch.
     func prefersSpotlightToolbarAccessory() -> Bool {
         selectedTool == .spotlight || spotlightSettingsForEditing() != nil
@@ -2005,6 +2155,11 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             var found = false
             for i in stride(from: annotations.count - 1, through: 0, by: -1) {
                 if case .crop = annotations[i].content { continue }
+                // Zoom selections apply to the overall recording and must not be
+                // dragged while the player is zoomed during play/scrub.
+                if case .zoom = annotations[i].content, !allowsZoomGeometryEditing {
+                    continue
+                }
                 if hitTest(annotation: annotations[i].content, point: pt) {
                     setSelectedIndex(i)
                     selectDragSavedState = annotations
@@ -2157,13 +2312,13 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             )
         case .zoom:
             currentAnnotation = .zoom(
-                rect: CGRect(
-                    x: min(dragStart.x, pt.x), y: min(dragStart.y, pt.y),
-                    width: abs(pt.x - dragStart.x), height: abs(pt.y - dragStart.y)
-                )
+                rect: zoomDragRect(from: dragStart, to: pt)
             )
         case .select:
             if let idx = selectedIndex {
+                if case .zoom = annotations[idx].content, !allowsZoomGeometryEditing {
+                    break
+                }
                 selectDidDrag = true
                 switch selectDragMode {
                 case .moveWhole:
@@ -2263,7 +2418,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                         )
                     } else if case .zoom = annotations[idx].content {
                         annotations[idx].content = .zoom(
-                            rect: resizedRect(anchor: anchor, handle: handle, to: pt)
+                            rect: resizedZoomRect(anchor: anchor, handle: handle, to: pt)
                         )
                     } else if case .crop = annotations[idx].content {
                         annotations[idx].content = .crop(
@@ -2303,6 +2458,19 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         if selectedTool == .spotlight, let cur = currentAnnotation {
             if case let .spotlight(region, _, _) = cur, region.width > 2, region.height > 2 {
                 commitPlacedSpotlight(cur)
+            } else {
+                currentAnnotation = nil
+            }
+            selectDragSavedState = nil
+            selectDidDrag = false
+            selectDragMode = .none
+            needsDisplay = true
+            return
+        }
+
+        if selectedTool == .zoom, let cur = currentAnnotation {
+            if case let .zoom(rect) = cur, rect.width > 2, rect.height > 2 {
+                commitPlacedZoom(cur)
             } else {
                 currentAnnotation = nil
             }
@@ -2622,6 +2790,138 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         }
 
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// Aspect-locked rect from a drag origin to the current pointer (zoom tool).
+    private func zoomDragRect(from origin: CGPoint, to point: CGPoint) -> CGRect {
+        let ratio = effectiveVideoAspectRatio
+        guard ratio > 0 else {
+            return CGRect(
+                x: min(origin.x, point.x),
+                y: min(origin.y, point.y),
+                width: abs(point.x - origin.x),
+                height: abs(point.y - origin.y)
+            )
+        }
+        return aspectLockedRect(from: origin, to: point, aspectRatio: ratio, minSize: 1)
+    }
+
+    private func resizedZoomRect(anchor: CGRect, handle: RectResizeHandle, to point: CGPoint) -> CGRect {
+        let ratio = effectiveVideoAspectRatio
+        guard ratio > 0 else {
+            return resizedRect(anchor: anchor, handle: handle, to: point)
+        }
+        return aspectLockedResizedRect(
+            anchor: anchor,
+            handle: handle,
+            to: point,
+            aspectRatio: ratio,
+            minSize: rectMinSize
+        )
+    }
+
+    private var effectiveVideoAspectRatio: CGFloat {
+        if videoAspectRatio > 0 { return videoAspectRatio }
+        // Fallback: match the canvas frame so zoom still fills without letterboxing.
+        guard bounds.height > 0 else { return 0 }
+        return bounds.width / bounds.height
+    }
+
+    /// Builds a rect locked to `aspectRatio` (width/height), anchored at `origin`.
+    private func aspectLockedRect(
+        from origin: CGPoint,
+        to point: CGPoint,
+        aspectRatio: CGFloat,
+        minSize: CGFloat
+    ) -> CGRect {
+        let dx = point.x - origin.x
+        let dy = point.y - origin.y
+        var width = abs(dx)
+        var height = abs(dy)
+
+        if height < 0.001 || width / max(height, 0.001) > aspectRatio {
+            height = width / aspectRatio
+        } else {
+            width = height * aspectRatio
+        }
+
+        width = max(width, minSize)
+        height = max(height, minSize * (aspectRatio > 0 ? 1 / aspectRatio : 1))
+        // Re-assert aspect after min-size clamp.
+        if width / height > aspectRatio {
+            height = width / aspectRatio
+        } else {
+            width = height * aspectRatio
+        }
+
+        let x = dx >= 0 ? origin.x : origin.x - width
+        let y = dy >= 0 ? origin.y : origin.y - height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    private func aspectLockedResizedRect(
+        anchor: CGRect,
+        handle: RectResizeHandle,
+        to point: CGPoint,
+        aspectRatio: CGFloat,
+        minSize: CGFloat
+    ) -> CGRect {
+        // Opposite corner / edge stays fixed; size follows the pointer at recording aspect.
+        let origin: CGPoint
+        let toward: CGPoint
+
+        switch handle {
+        case .topLeft:
+            origin = CGPoint(x: anchor.maxX, y: anchor.minY)
+            toward = point
+        case .topRight:
+            origin = CGPoint(x: anchor.minX, y: anchor.minY)
+            toward = point
+        case .bottomRight:
+            origin = CGPoint(x: anchor.minX, y: anchor.maxY)
+            toward = point
+        case .bottomLeft:
+            origin = CGPoint(x: anchor.maxX, y: anchor.maxY)
+            toward = point
+        case .top:
+            let height = max(abs(point.y - anchor.minY), minSize / max(aspectRatio, 0.001))
+            let width = height * aspectRatio
+            return CGRect(
+                x: anchor.midX - width / 2,
+                y: min(point.y, anchor.minY),
+                width: width,
+                height: height
+            )
+        case .bottom:
+            let height = max(abs(point.y - anchor.maxY), minSize / max(aspectRatio, 0.001))
+            let width = height * aspectRatio
+            return CGRect(
+                x: anchor.midX - width / 2,
+                y: min(point.y, anchor.maxY),
+                width: width,
+                height: height
+            )
+        case .left:
+            let width = max(abs(point.x - anchor.maxX), minSize)
+            let height = width / aspectRatio
+            return CGRect(
+                x: min(point.x, anchor.maxX),
+                y: anchor.midY - height / 2,
+                width: width,
+                height: height
+            )
+        case .right:
+            let width = max(abs(point.x - anchor.minX), minSize)
+            let height = width / aspectRatio
+            return CGRect(
+                x: min(point.x, anchor.minX),
+                y: anchor.midY - height / 2,
+                width: width,
+                height: height
+            )
+        }
+
+        return aspectLockedRect(from: origin, to: toward, aspectRatio: aspectRatio, minSize: minSize)
     }
 
     func hitTest(annotation: Annotation, point: CGPoint) -> Bool {

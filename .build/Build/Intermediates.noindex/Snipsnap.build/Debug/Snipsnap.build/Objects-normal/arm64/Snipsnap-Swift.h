@@ -344,6 +344,7 @@ extern "C" {
 #if __has_warning("-Watimport-in-framework-header")
 #pragma clang diagnostic ignored "-Watimport-in-framework-header"
 #endif
+@import AVFoundation;
 @import AppKit;
 @import CoreMedia;
 @import Foundation;
@@ -371,43 +372,115 @@ extern "C" {
 
 #if defined(__OBJC__)
 
-@class NSEvent;
 @class NSCoder;
+SWIFT_CLASS("_TtC8Snipsnap23AnnotationActionBarView")
+@interface AnnotationActionBarView : NSView
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+- (void)layout;
+- (void)resetCursorRects;
+@end
+
+@class NSEvent;
+@class NSNotification;
 SWIFT_CLASS("_TtC8Snipsnap20AnnotationCanvasView")
-@interface AnnotationCanvasView : NSView
+@interface AnnotationCanvasView : NSView <NSTextFieldDelegate>
 - (void)drawRect:(NSRect)dirtyRect;
+- (void)viewDidMoveToWindow;
+- (void)updateTrackingAreas;
+- (void)mouseMoved:(NSEvent * _Nonnull)event;
 - (BOOL)acceptsFirstMouse:(NSEvent * _Nullable)event SWIFT_WARN_UNUSED_RESULT;
 @property (nonatomic, readonly) BOOL acceptsFirstResponder;
 - (void)mouseDown:(NSEvent * _Nonnull)event;
 - (void)mouseDragged:(NSEvent * _Nonnull)event;
 - (void)mouseUp:(NSEvent * _Nonnull)event;
+- (void)controlTextDidEndEditing:(NSNotification * _Nonnull)obj;
+- (BOOL)performKeyEquivalent:(NSEvent * _Nonnull)event SWIFT_WARN_UNUSED_RESULT;
 - (void)keyDown:(NSEvent * _Nonnull)event;
 - (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
+@class NSControl;
+@class NSTextView;
+SWIFT_CLASS("_TtC8Snipsnap27AnnotationFileSettingsPanel")
+@interface AnnotationFileSettingsPanel : NSObject <NSTextFieldDelegate>
+- (BOOL)control:(NSControl * _Nonnull)control textView:(NSTextView * _Nonnull)textView doCommandBySelector:(SEL _Nonnull)commandSelector SWIFT_WARN_UNUSED_RESULT;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 @end
 
 /// NSTextField subclass that intercepts Escape before AppKit can beep.
 SWIFT_CLASS("_TtC8Snipsnap19AnnotationTextField")
 @interface AnnotationTextField : NSTextField
 - (void)keyDown:(NSEvent * _Nonnull)event;
+- (void)textDidChange:(NSNotification * _Nonnull)notification;
 - (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
 @end
 
+SWIFT_CLASS("_TtC8Snipsnap30AnnotationTitlebarTitleControl")
+@interface AnnotationTitlebarTitleControl : NSButton
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+- (void)resetCursorRects;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect SWIFT_UNAVAILABLE;
+@end
+
 SWIFT_CLASS("_TtC8Snipsnap16AnnotationWindow")
 @interface AnnotationWindow : NSWindow
+- (void)setFrame:(NSRect)frameRect display:(BOOL)displayFlag;
+- (void)close;
 - (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
 @end
 
-@class NSNotification;
+@class NSApplication;
+@class NSMenu;
 SWIFT_CLASS("_TtC8Snipsnap11AppDelegate")
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 - (void)applicationDidFinishLaunching:(NSNotification * _Nonnull)notification;
 - (void)applicationWillTerminate:(NSNotification * _Nonnull)notification;
+- (BOOL)applicationShouldHandleReopen:(NSApplication * _Nonnull)sender hasVisibleWindows:(BOOL)flag SWIFT_WARN_UNUSED_RESULT;
+- (NSMenu * _Nullable)applicationDockMenu:(NSApplication * _Nonnull)sender SWIFT_WARN_UNUSED_RESULT;
+- (void)showCaptureBar;
 - (void)toggleRecording;
-- (void)previewRecordingToast;
+- (void)stopRecording;
+- (void)openSettings;
 - (void)takeScreenshot;
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap19ArrowStyleMenuPanel")
+@interface ArrowStyleMenuPanel : NSObject
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap21BackgroundStyleSwatch")
+@interface BackgroundStyleSwatch : NSControl
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+- (void)resetCursorRects;
+- (void)mouseUp:(NSEvent * _Nonnull)event;
+- (void)drawRect:(NSRect)dirtyRect;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect SWIFT_UNAVAILABLE;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap10CaptureBar")
+@interface CaptureBar : NSPanel
+- (void)orderOut:(id _Nullable)sender;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@property (nonatomic, readonly) BOOL canBecomeKeyWindow;
+- (void)cancelOperation:(id _Nullable)sender;
+- (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap20CaptureLibraryWindow")
+@interface CaptureLibraryWindow : NSWindow <NSWindowDelegate>
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+- (void)windowWillClose:(NSNotification * _Nonnull)notification;
+- (void)layoutIfNeeded;
+- (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
 @end
 
 SWIFT_CLASS("_TtC8Snipsnap17CircleColorButton")
@@ -417,16 +490,87 @@ SWIFT_CLASS("_TtC8Snipsnap17CircleColorButton")
 - (nonnull instancetype)initWithFrame:(NSRect)frameRect SWIFT_UNAVAILABLE;
 @end
 
+SWIFT_CLASS("_TtC8Snipsnap18ColorGridMenuPanel")
+@interface ColorGridMenuPanel : NSObject
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap18DrawStyleMenuPanel")
+@interface DrawStyleMenuPanel : NSObject
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap26FigmaStyleColorPickerPanel")
+@interface FigmaStyleColorPickerPanel : NSObject <NSTextFieldDelegate>
+- (void)controlTextDidChange:(NSNotification * _Nonnull)obj;
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+/// Toggleable recording preview: small thumbnail bottom-left, click to expand full stage.
+SWIFT_CLASS("_TtC8Snipsnap32RecordingBackgroundPreviewWindow")
+@interface RecordingBackgroundPreviewWindow : NSPanel
+- (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
+@end
+
 @class SCStream;
+@class AVCaptureOutput;
+@class AVCaptureConnection;
 SWIFT_CLASS("_TtC8Snipsnap15RecordingEngine")
-@interface RecordingEngine : NSObject <SCStreamDelegate, SCStreamOutput>
+@interface RecordingEngine : NSObject <AVCaptureAudioDataOutputSampleBufferDelegate, SCStreamDelegate, SCStreamOutput>
 - (void)stream:(SCStream * _Nonnull)stream didOutputSampleBuffer:(CMSampleBufferRef _Nonnull)buffer ofType:(SCStreamOutputType)type;
 - (void)stream:(SCStream * _Nonnull)stream didStopWithError:(NSError * _Nonnull)error;
+- (void)captureOutput:(AVCaptureOutput * _Nonnull)output didOutputSampleBuffer:(CMSampleBufferRef _Nonnull)sampleBuffer fromConnection:(AVCaptureConnection * _Nonnull)connection;
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
 @end
 
+SWIFT_CLASS("_TtC8Snipsnap14SettingsWindow")
+@interface SettingsWindow : NSWindow
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+- (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
+@end
+
+/// Right-edge overlay for presentation settings (background, side-by-side).
+/// Hidden until presented; overlays content without resizing the stage.
+SWIFT_CLASS("_TtC8Snipsnap15ShipItPanelView")
+@interface ShipItPanelView : NSView
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap21SpotlightOptionsPanel")
+@interface SpotlightOptionsPanel : NSObject
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap18StickerPickerPanel")
+@interface StickerPickerPanel : NSObject <NSWindowDelegate>
+- (nonnull instancetype)init SWIFT_UNAVAILABLE;
++ (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
+@end
+
 SWIFT_CLASS("_TtC8Snipsnap11ToastWindow")
-@interface ToastWindow : NSWindow
+@interface ToastWindow : NSPanel
+- (void)mouseUp:(NSEvent * _Nonnull)event;
+- (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap15ToolHoverButton")
+@interface ToolHoverButton : NSButton
+- (void)updateTrackingAreas;
+- (void)mouseEntered:(NSEvent * _Nonnull)event;
+- (void)mouseExited:(NSEvent * _Nonnull)event;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap16ToolTooltipPanel")
+@interface ToolTooltipPanel : NSPanel
+- (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
 - (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
 @end
 
@@ -434,6 +578,42 @@ SWIFT_CLASS("_TtC8Snipsnap15ToolbarPillView")
 @interface ToolbarPillView : NSView
 - (nonnull instancetype)initWithFrame:(NSRect)frame OBJC_DESIGNATED_INITIALIZER;
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@property (nonatomic, readonly, getter=isOpaque) BOOL opaque;
+- (void)viewDidMoveToWindow;
+- (void)layout;
+- (NSView * _Nullable)hitTest:(NSPoint)point SWIFT_WARN_UNUSED_RESULT;
+- (void)mouseDown:(NSEvent * _Nonnull)event;
+- (void)mouseDragged:(NSEvent * _Nonnull)event;
+- (void)mouseUp:(NSEvent * _Nonnull)event;
+- (void)updateTrackingAreas;
+- (void)mouseMoved:(NSEvent * _Nonnull)event;
+- (void)cursorUpdate:(NSEvent * _Nonnull)event;
+- (void)resetCursorRects;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap21VideoAnnotationWindow")
+@interface VideoAnnotationWindow : NSWindow
+- (void)setFrame:(NSRect)frameRect display:(BOOL)displayFlag;
+- (void)close;
+- (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap17VideoTimelineView")
+@interface VideoTimelineView : NSView
+@property (nonatomic, readonly) BOOL acceptsFirstResponder;
+- (void)drawRect:(NSRect)dirtyRect;
+- (void)mouseDown:(NSEvent * _Nonnull)event;
+- (void)mouseDragged:(NSEvent * _Nonnull)event;
+- (void)mouseUp:(NSEvent * _Nonnull)event;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+@end
+
+SWIFT_CLASS("_TtC8Snipsnap18ZoomablePlayerView")
+@interface ZoomablePlayerView : NSView
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+- (void)layout;
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect SWIFT_UNAVAILABLE;
 @end
 
 #endif // defined(__OBJC__)

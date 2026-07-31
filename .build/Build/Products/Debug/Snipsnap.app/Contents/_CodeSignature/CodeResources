@@ -3,14 +3,23 @@
 <plist version="1.0">
 <dict>
 	<key>files</key>
-	<dict/>
+	<dict>
+		<key>Resources/AppIcon.icns</key>
+		<data>
+		CGG4MG/QLUEWtO/GeEoF0ePQnt4=
+		</data>
+		<key>Resources/Assets.car</key>
+		<data>
+		zscOa/dBSFN7IPa+OYTQHkbZ3LM=
+		</data>
+	</dict>
 	<key>files2</key>
 	<dict>
 		<key>MacOS/Snipsnap.debug.dylib</key>
 		<dict>
 			<key>cdhash</key>
 			<data>
-			XFbU4iiUsMPkKNz63nh8W2UXnB0=
+			IgKc0qyUVeOfXNxpAJnWy+hThX8=
 			</data>
 			<key>requirement</key>
 			<string>identifier "Snipsnap.debug" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: ethanwatsonj88@gmail.com (556ZG447JB)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>
@@ -23,6 +32,20 @@
 			</data>
 			<key>requirement</key>
 			<string>identifier "__preview" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: ethanwatsonj88@gmail.com (556ZG447JB)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>
+		</dict>
+		<key>Resources/AppIcon.icns</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			YmdZ1rwdVrQQUAdP+WU3ltQgK6OSH5XOg6zDzMNd+V0=
+			</data>
+		</dict>
+		<key>Resources/Assets.car</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			3Yo4EcyWKJULuTHwGtcDT8iPAkbHHQdc7k6PlPcK1lg=
+			</data>
 		</dict>
 	</dict>
 	<key>rules</key>

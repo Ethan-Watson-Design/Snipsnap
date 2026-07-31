@@ -74,6 +74,19 @@ enum CaptureLibraryOrganizer {
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
+    /// Distinct tag names of the given kind across the capture library.
+    static func existingTagNames(kind: CaptureTagKind) -> [String] {
+        var names = Set<String>()
+        for entry in CaptureHistory.shared.entries {
+            for tag in entry.tags where tag.kind == kind {
+                let name = tag.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { continue }
+                names.insert(name)
+            }
+        }
+        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
     static func sanitizedProjectName(_ raw: String) -> String? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }

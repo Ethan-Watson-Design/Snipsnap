@@ -1,0 +1,56 @@
+{
+  "source": "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/CaptureTagBar.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Add tag",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 90
+        }
+      },
+      {
+        "comment": "",
+        "key": "No tags",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 36
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove %@ tag",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 60
+        }
+      },
+      {
+        "comment": "",
+        "key": "Kind",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 95
+        }
+      },
+      {
+        "comment": "",
+        "key": "Tag name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 104
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 111
+        }
+      }
+    ]
+  },
+  "version": 1
+}

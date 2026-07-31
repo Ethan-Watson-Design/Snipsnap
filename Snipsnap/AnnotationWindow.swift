@@ -867,14 +867,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
 
     private enum CropDragMode {
         case none
-        case creating
         case moving(origin: CGRect, start: CGPoint)
         case resizing(handle: RectResizeHandle, anchor: CGRect)
     }
 
     private var cropEditingRect: CGRect?
     private var cropDragMode: CropDragMode = .none
-    private var cropDragStart: CGPoint = .zero
 
     private var strokePoints: [CGPoint] = []
     private var dragStart: CGPoint = .zero
@@ -1328,44 +1326,28 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    private func cropRectBetween(_ a: CGPoint, _ b: CGPoint) -> CGRect {
-        CGRect(
-            x: min(a.x, b.x),
-            y: min(a.y, b.y),
-            width: abs(b.x - a.x),
-            height: abs(b.y - a.y)
-        )
-    }
-
     private func resizedCropRect(anchor: CGRect, handle: RectResizeHandle, to point: CGPoint) -> CGRect {
         clampedCropRect(resizedRect(anchor: anchor, handle: handle, to: point))
     }
 
     private func handleCropMouseDown(at pt: CGPoint) {
-        cropDragStart = pt
         if let rect = cropEditingRect, rect.width > 1, rect.height > 1 {
             if let handle = rectHitTestHandle(at: pt, in: rect) {
                 cropDragMode = .resizing(handle: handle, anchor: rect)
                 return
             }
-            if rectInterior(of: rect).contains(pt) {
-                if isFullBoundsCrop(rect) {
-                    cropDragMode = .creating
-                } else {
-                    cropDragMode = .moving(origin: rect, start: pt)
-                }
+            if rectInterior(of: rect).contains(pt), !isFullBoundsCrop(rect) {
+                cropDragMode = .moving(origin: rect, start: pt)
                 return
             }
         }
-        cropDragMode = .creating
+        cropDragMode = .none
     }
 
     private func handleCropMouseDragged(to pt: CGPoint) {
         switch cropDragMode {
         case .none:
             break
-        case .creating:
-            cropEditingRect = clampedCropRect(cropRectBetween(cropDragStart, pt))
         case .moving(let origin, let start):
             let dx = pt.x - start.x
             let dy = pt.y - start.y

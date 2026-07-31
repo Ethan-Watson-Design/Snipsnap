@@ -5,6 +5,7 @@
 
 import AppKit
 import AVFoundation
+import ImageIO
 
 enum CaptureNaming {
     private static let formatter: DateFormatter = {
@@ -69,17 +70,29 @@ struct CaptureEntry: Identifiable {
     let createdAt: Date
     let item: CaptureItem
     let customName: String?
+    let tags: [CaptureTag]
 
-    init(id: UUID, createdAt: Date, item: CaptureItem, customName: String? = nil) {
+    init(
+        id: UUID,
+        createdAt: Date,
+        item: CaptureItem,
+        customName: String? = nil,
+        tags: [CaptureTag] = []
+    ) {
         self.id = id
         self.createdAt = createdAt
         self.item = item
         self.customName = customName
+        self.tags = CaptureTag.sorted(tags)
     }
 
     var thumbnail: NSImage { item.thumbnail }
     var isRecording: Bool { item.isRecording }
     var kindLabel: String { item.kindLabel }
+
+    var projectTag: CaptureTag? {
+        tags.first { $0.kind == .project }
+    }
 
     var displayName: String {
         if let customName, !customName.isEmpty {
@@ -136,6 +149,8 @@ final class CaptureHistory {
 
     static let maxMenuItems = 3
     private static let maxStored = 200
+    /// Max edge for list/menu thumbnails. Full images stay on disk until requested.
+    private static let thumbnailMaxPixelSize: CGFloat = 240
 
     private struct StoredCapture: Codable {
         enum Kind: String, Codable {
@@ -149,11 +164,43 @@ final class CaptureHistory {
         let path: String
         let thumbnailPath: String?
         let customName: String?
+        let tags: [CaptureTag]
+
+        init(
+            id: UUID,
+            createdAt: Date,
+            kind: Kind,
+            path: String,
+            thumbnailPath: String?,
+            customName: String?,
+            tags: [CaptureTag] = []
+        ) {
+            self.id = id
+            self.createdAt = createdAt
+            self.kind = kind
+            self.path = path
+            self.thumbnailPath = thumbnailPath
+            self.customName = customName
+            self.tags = tags
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            createdAt = try container.decode(Date.self, forKey: .createdAt)
+            kind = try container.decode(Kind.self, forKey: .kind)
+            path = try container.decode(String.self, forKey: .path)
+            thumbnailPath = try container.decodeIfPresent(String.self, forKey: .thumbnailPath)
+            customName = try container.decodeIfPresent(String.self, forKey: .customName)
+            tags = try container.decodeIfPresent([CaptureTag].self, forKey: .tags) ?? []
+        }
     }
 
     private let storageDirectory: URL
     private let manifestURL: URL
     private var storedCaptures: [StoredCapture] = []
+    /// Full-resolution screenshot cache. Entries themselves only keep list thumbnails.
+    private let fullImageCache = NSCache<NSUUID, NSImage>()
 
     private(set) var entries: [CaptureEntry] = []
 
@@ -165,47 +212,77 @@ final class CaptureHistory {
         storageDirectory = appSupport.appendingPathComponent("Snipsnap/recents", isDirectory: true)
         manifestURL = storageDirectory.appendingPathComponent("manifest.json")
         try? FileManager.default.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+        fullImageCache.countLimit = 24
         loadFromDisk()
     }
 
     @discardableResult
     func add(_ item: CaptureItem) -> CaptureEntry? {
-        let entry = CaptureEntry(id: UUID(), createdAt: Date(), item: item)
+        let id = UUID()
+        let createdAt = Date()
 
         switch item {
         case .screenshot(let image):
-            guard let path = saveScreenshot(image, at: entry.createdAt) else { return nil }
+            guard let path = saveScreenshot(image, at: createdAt) else { return nil }
+            let thumb = Self.downsampledImage(image, maxPixelSize: Self.thumbnailMaxPixelSize) ?? image
+            let thumbPath = saveThumbnail(thumb)
+            fullImageCache.setObject(image, forKey: id as NSUUID)
+            let entry = CaptureEntry(id: id, createdAt: createdAt, item: .screenshot(thumb), tags: [])
             storedCaptures.insert(
                 StoredCapture(
-                    id: entry.id,
-                    createdAt: entry.createdAt,
+                    id: id,
+                    createdAt: createdAt,
                     kind: .screenshot,
                     path: path.path,
-                    thumbnailPath: nil,
-                    customName: nil
+                    thumbnailPath: thumbPath?.path,
+                    customName: nil,
+                    tags: []
                 ),
                 at: 0
             )
+            entries.insert(entry, at: 0)
 
         case .recording(let url, let thumbnail):
             let thumbPath = saveThumbnail(thumbnail)
+            let entry = CaptureEntry(id: id, createdAt: createdAt, item: item, tags: [])
             storedCaptures.insert(
                 StoredCapture(
-                    id: entry.id,
-                    createdAt: entry.createdAt,
+                    id: id,
+                    createdAt: createdAt,
                     kind: .recording,
                     path: url.path,
                     thumbnailPath: thumbPath?.path,
-                    customName: nil
+                    customName: nil,
+                    tags: []
                 ),
                 at: 0
             )
+            entries.insert(entry, at: 0)
         }
 
-        entries.insert(entry, at: 0)
         trimAndPersist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
-        return entry
+        return entries.first
+    }
+
+    /// Full-resolution screenshot for annotate / classify / preview. Recordings return their thumbnail.
+    func fullImage(for id: UUID) -> NSImage? {
+        if let cached = fullImageCache.object(forKey: id as NSUUID) {
+            return cached
+        }
+        guard let stored = storedCaptures.first(where: { $0.id == id }) else {
+            return entries.first(where: { $0.id == id })?.thumbnail
+        }
+
+        switch stored.kind {
+        case .screenshot:
+            let url = URL(fileURLWithPath: stored.path)
+            guard let image = NSImage(contentsOf: url) else { return nil }
+            fullImageCache.setObject(image, forKey: id as NSUUID)
+            return image
+        case .recording:
+            return entries.first(where: { $0.id == id })?.thumbnail
+        }
     }
 
     func entry(at index: Int) -> CaptureEntry? {
@@ -216,7 +293,8 @@ final class CaptureHistory {
     func previousScreenshot(excluding id: UUID?) -> (entry: CaptureEntry, image: NSImage)? {
         for entry in entries {
             guard entry.id != id else { continue }
-            guard case .screenshot(let image) = entry.item else { continue }
+            guard case .screenshot = entry.item else { continue }
+            guard let image = fullImage(for: entry.id) else { continue }
             return (entry, image)
         }
         return nil
@@ -226,7 +304,8 @@ final class CaptureHistory {
         var results: [(CaptureEntry, NSImage)] = []
         for entry in entries {
             guard entry.id != id else { continue }
-            guard case .screenshot(let image) = entry.item else { continue }
+            guard case .screenshot = entry.item else { continue }
+            guard let image = fullImage(for: entry.id) else { continue }
             results.append((entry, image))
             if results.count >= limit { break }
         }
@@ -238,6 +317,15 @@ final class CaptureHistory {
         let url = URL(fileURLWithPath: stored.path)
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
+    }
+
+    func parentDirectoryURL(for id: UUID) -> URL? {
+        fileURL(for: id)?.deletingLastPathComponent()
+    }
+
+    func isAtRootCapture(id: UUID) -> Bool {
+        guard let parent = parentDirectoryURL(for: id) else { return false }
+        return parent.standardizedFileURL == AppSettings.destinationFolderURL.standardizedFileURL
     }
 
     @discardableResult
@@ -252,11 +340,31 @@ final class CaptureHistory {
         guard writePNG(image, to: url) else { return false }
 
         let entry = entries[entryIndex]
+        let thumb = Self.downsampledImage(image, maxPixelSize: Self.thumbnailMaxPixelSize) ?? image
+        if let thumbPath = saveThumbnail(thumb) {
+            let stored = storedCaptures[storedIndex]
+            // Drop previous screenshot thumb if we had one.
+            if let oldThumb = stored.thumbnailPath, oldThumb != thumbPath.path {
+                try? FileManager.default.removeItem(atPath: oldThumb)
+            }
+            storedCaptures[storedIndex] = StoredCapture(
+                id: stored.id,
+                createdAt: stored.createdAt,
+                kind: stored.kind,
+                path: stored.path,
+                thumbnailPath: thumbPath.path,
+                customName: stored.customName,
+                tags: stored.tags
+            )
+            persist()
+        }
+        fullImageCache.setObject(image, forKey: id as NSUUID)
         entries[entryIndex] = CaptureEntry(
             id: entry.id,
             createdAt: entry.createdAt,
-            item: .screenshot(image),
-            customName: entry.customName
+            item: .screenshot(thumb),
+            customName: entry.customName,
+            tags: entry.tags
         )
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
         return true
@@ -294,7 +402,8 @@ final class CaptureHistory {
             kind: stored.kind,
             path: newURL.path,
             thumbnailPath: stored.thumbnailPath,
-            customName: sanitized
+            customName: sanitized,
+            tags: stored.tags
         )
         storedCaptures[storedIndex] = updatedStored
 
@@ -303,11 +412,48 @@ final class CaptureHistory {
             id: entry.id,
             createdAt: entry.createdAt,
             item: entry.item,
-            customName: sanitized
+            customName: sanitized,
+            tags: entry.tags
         )
         persist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
         return true
+    }
+
+    func moveCapture(id: UUID, toDirectory directory: URL) -> URL? {
+        guard let storedIndex = storedCaptures.firstIndex(where: { $0.id == id }) else {
+            return nil
+        }
+
+        let stored = storedCaptures[storedIndex]
+        let oldURL = URL(fileURLWithPath: stored.path)
+        let newURL = CaptureNaming.uniqueURL(
+            in: directory,
+            preferredFilename: oldURL.lastPathComponent
+        )
+
+        if oldURL != newURL {
+            let fileManager = FileManager.default
+            do {
+                try fileManager.moveItem(at: oldURL, to: newURL)
+            } catch {
+                return nil
+            }
+        }
+
+        let updatedStored = StoredCapture(
+            id: stored.id,
+            createdAt: stored.createdAt,
+            kind: stored.kind,
+            path: newURL.path,
+            thumbnailPath: stored.thumbnailPath,
+            customName: stored.customName,
+            tags: stored.tags
+        )
+        storedCaptures[storedIndex] = updatedStored
+        persist()
+        NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+        return newURL
     }
 
     func remove(id: UUID) {
@@ -317,8 +463,175 @@ final class CaptureHistory {
 
         storedCaptures.remove(at: index)
         entries.removeAll { $0.id == id }
+        fullImageCache.removeObject(forKey: id as NSUUID)
         persist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+    }
+
+    // MARK: - Tags
+
+    func tags(for id: UUID) -> [CaptureTag] {
+        entries.first(where: { $0.id == id })?.tags ?? []
+    }
+
+    @discardableResult
+    func addTag(id: UUID, kind: CaptureTagKind, name: String) -> CaptureTag? {
+        if kind == .project {
+            return setProjectTag(id: id, name: name) ? tags(for: id).first(where: { $0.kind == .project }) : nil
+        }
+
+        let normalized = CaptureTag.normalizeName(name)
+        guard !normalized.isEmpty else { return nil }
+
+        var created: CaptureTag?
+        let ok = mutateTags(id: id) { tags in
+            if tags.contains(where: {
+                $0.kind == kind && $0.name.caseInsensitiveCompare(normalized) == .orderedSame
+            }) {
+                return
+            }
+            let tag = CaptureTag(kind: kind, name: normalized)
+            tags.append(tag)
+            created = tag
+        }
+        return ok ? created : nil
+    }
+
+    @discardableResult
+    func removeTag(id: UUID, tagID: UUID) -> Bool {
+        guard let tag = tags(for: id).first(where: { $0.id == tagID }) else { return false }
+        if tag.kind == .project {
+            return clearProjectTag(id: id)
+        }
+        return mutateTags(id: id) { tags in
+            tags.removeAll { $0.id == tagID }
+        }
+    }
+
+    /// Upserts the sole project tag and moves the file into that project folder.
+    @discardableResult
+    func setProjectTag(id: UUID, name: String) -> Bool {
+        let normalized = CaptureTag.normalizeName(name)
+        guard !normalized.isEmpty else { return false }
+
+        let destination = CaptureDestination(
+            productFolder: normalized,
+            subfolder: nil,
+            confidence: 1.0,
+            source: .windowMetadata
+        )
+        guard AutoOrganizer.moveCapture(id: id, to: destination) else { return false }
+
+        return mutateTags(id: id, notify: true) { tags in
+            tags.removeAll { $0.kind == .project }
+            tags.insert(CaptureTag(kind: .project, name: normalized), at: 0)
+        }
+    }
+
+    /// Removes the project tag and moves the file back to the root save folder.
+    @discardableResult
+    func clearProjectTag(id: UUID) -> Bool {
+        let root = AppSettings.destinationFolderURL
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        } catch {
+            return false
+        }
+
+        if !isAtRootCapture(id: id) {
+            guard moveCapture(id: id, toDirectory: root) != nil else { return false }
+        }
+
+        return mutateTags(id: id, notify: true) { tags in
+            tags.removeAll { $0.kind == .project }
+        }
+    }
+
+    /// Replaces non-project tags (and optionally upserts project) from an Auto-Tag accept batch.
+    @discardableResult
+    func applyTagSuggestion(
+        id: UUID,
+        project: String?,
+        flow: String?,
+        components: [String]
+    ) -> Bool {
+        var ok = true
+
+        if let project, !CaptureTag.normalizeName(project).isEmpty {
+            ok = setProjectTag(id: id, name: project) && ok
+        }
+
+        if let flow {
+            _ = addTag(id: id, kind: .flow, name: flow)
+        }
+
+        for component in components {
+            _ = addTag(id: id, kind: .component, name: component)
+        }
+
+        return ok
+    }
+
+    /// Aligns the project tag with the capture's current parent folder (after moves / reverts).
+    func syncProjectTagFromFolder(id: UUID) {
+        guard let parent = parentDirectoryURL(for: id) else { return }
+        let root = AppSettings.destinationFolderURL.standardizedFileURL
+
+        if parent.standardizedFileURL == root {
+            _ = mutateTags(id: id) { tags in
+                tags.removeAll { $0.kind == .project }
+            }
+            return
+        }
+
+        let folderName = CaptureTag.normalizeName(parent.lastPathComponent)
+        guard !folderName.isEmpty else { return }
+        _ = mutateTags(id: id) { tags in
+            tags.removeAll { $0.kind == .project }
+            tags.insert(CaptureTag(kind: .project, name: folderName), at: 0)
+        }
+    }
+
+    @discardableResult
+    private func mutateTags(
+        id: UUID,
+        notify: Bool = true,
+        _ transform: (inout [CaptureTag]) -> Void
+    ) -> Bool {
+        guard let storedIndex = storedCaptures.firstIndex(where: { $0.id == id }),
+              let entryIndex = entries.firstIndex(where: { $0.id == id }) else {
+            return false
+        }
+
+        let stored = storedCaptures[storedIndex]
+        var tags = stored.tags
+        transform(&tags)
+        tags = CaptureTag.sorted(tags)
+
+        storedCaptures[storedIndex] = StoredCapture(
+            id: stored.id,
+            createdAt: stored.createdAt,
+            kind: stored.kind,
+            path: stored.path,
+            thumbnailPath: stored.thumbnailPath,
+            customName: stored.customName,
+            tags: tags
+        )
+
+        let entry = entries[entryIndex]
+        entries[entryIndex] = CaptureEntry(
+            id: entry.id,
+            createdAt: entry.createdAt,
+            item: entry.item,
+            customName: entry.customName,
+            tags: tags
+        )
+
+        persist()
+        if notify {
+            NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+        }
+        return true
     }
 
     // MARK: - Persistence
@@ -350,7 +663,8 @@ final class CaptureHistory {
                     kind: StoredCapture.Kind(rawValue: entry.kind.rawValue) ?? .screenshot,
                     path: entry.path,
                     thumbnailPath: entry.thumbnailPath,
-                    customName: nil
+                    customName: nil,
+                    tags: []
                 )
             )
         }
@@ -361,26 +675,78 @@ final class CaptureHistory {
     private func rebuildEntries(from stored: [StoredCapture]) {
         var loadedEntries: [CaptureEntry] = []
         var validStored: [StoredCapture] = []
+        var didMutateStored = false
 
         for entry in stored {
             guard let item = captureItem(from: entry) else { continue }
-            loadedEntries.append(
-                CaptureEntry(
+
+            var resolved = entry
+            // Backfill screenshot thumbnails so relaunch stays cheap.
+            if entry.kind == .screenshot,
+               entry.thumbnailPath == nil,
+               case .screenshot(let thumb) = item,
+               let thumbPath = saveThumbnail(thumb) {
+                resolved = StoredCapture(
                     id: entry.id,
                     createdAt: entry.createdAt,
+                    kind: entry.kind,
+                    path: entry.path,
+                    thumbnailPath: thumbPath.path,
+                    customName: entry.customName,
+                    tags: entry.tags
+                )
+                didMutateStored = true
+            }
+
+            let synthesized = synthesizeProjectTagIfNeeded(for: resolved)
+            if synthesized.tags != resolved.tags {
+                resolved = synthesized
+                didMutateStored = true
+            }
+
+            loadedEntries.append(
+                CaptureEntry(
+                    id: resolved.id,
+                    createdAt: resolved.createdAt,
                     item: item,
-                    customName: entry.customName
+                    customName: resolved.customName,
+                    tags: resolved.tags
                 )
             )
-            validStored.append(entry)
+            validStored.append(resolved)
         }
 
         entries = loadedEntries
         storedCaptures = validStored
 
-        if validStored.count != stored.count {
+        if didMutateStored || validStored.count != stored.count {
             persist()
         }
+    }
+
+    /// If the file lives in a project subfolder and has no project tag, synthesize one from the folder name.
+    private func synthesizeProjectTagIfNeeded(for stored: StoredCapture) -> StoredCapture {
+        guard !stored.tags.contains(where: { $0.kind == .project }) else { return stored }
+
+        let fileURL = URL(fileURLWithPath: stored.path)
+        let parent = fileURL.deletingLastPathComponent().standardizedFileURL
+        let root = AppSettings.destinationFolderURL.standardizedFileURL
+        guard parent != root else { return stored }
+
+        let folderName = CaptureTag.normalizeName(parent.lastPathComponent)
+        guard !folderName.isEmpty else { return stored }
+
+        var tags = stored.tags
+        tags.insert(CaptureTag(kind: .project, name: folderName), at: 0)
+        return StoredCapture(
+            id: stored.id,
+            createdAt: stored.createdAt,
+            kind: stored.kind,
+            path: stored.path,
+            thumbnailPath: stored.thumbnailPath,
+            customName: stored.customName,
+            tags: CaptureTag.sorted(tags)
+        )
     }
 
     private func captureItem(from entry: StoredCapture) -> CaptureItem? {
@@ -389,11 +755,18 @@ final class CaptureHistory {
         switch entry.kind {
         case .screenshot:
             let url = URL(fileURLWithPath: entry.path)
-            guard fileManager.fileExists(atPath: url.path),
-                  let image = NSImage(contentsOf: url) else {
+            guard fileManager.fileExists(atPath: url.path) else { return nil }
+
+            if let thumbPath = entry.thumbnailPath,
+               fileManager.fileExists(atPath: thumbPath),
+               let thumb = NSImage(contentsOf: URL(fileURLWithPath: thumbPath)) {
+                return .screenshot(thumb)
+            }
+
+            guard let thumb = Self.downsampledImage(at: url, maxPixelSize: Self.thumbnailMaxPixelSize) else {
                 return nil
             }
-            return .screenshot(image)
+            return .screenshot(thumb)
 
         case .recording:
             let url = URL(fileURLWithPath: entry.path)
@@ -414,6 +787,7 @@ final class CaptureHistory {
         if entries.count > Self.maxStored {
             let evicted = storedCaptures.suffix(from: Self.maxStored)
             for entry in evicted {
+                fullImageCache.removeObject(forKey: entry.id as NSUUID)
                 cleanupStoredFiles(for: entry)
             }
             entries = Array(entries.prefix(Self.maxStored))
@@ -433,6 +807,9 @@ final class CaptureHistory {
         switch entry.kind {
         case .screenshot:
             try? fileManager.removeItem(atPath: entry.path)
+            if let thumbPath = entry.thumbnailPath {
+                try? fileManager.removeItem(atPath: thumbPath)
+            }
         case .recording:
             if let thumbPath = entry.thumbnailPath {
                 try? fileManager.removeItem(atPath: thumbPath)
@@ -467,8 +844,18 @@ final class CaptureHistory {
     }
 
     private func saveScreenshot(_ image: NSImage, at date: Date) -> URL? {
+        let destinationDirectory = AppSettings.destinationFolderURL
+        do {
+            try FileManager.default.createDirectory(
+                at: destinationDirectory,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            return nil
+        }
+
         let url = CaptureNaming.uniqueURL(
-            in: storageDirectory,
+            in: destinationDirectory,
             preferredFilename: CaptureNaming.screenshotFilename(at: date)
         )
         guard writePNG(image, to: url) else { return nil }
@@ -521,6 +908,37 @@ final class CaptureHistory {
         }
         semaphore.wait()
         return thumbnailResult.image
+    }
+
+    // MARK: - Downsampling
+
+    private static func downsampledImage(at url: URL, maxPixelSize: CGFloat) -> NSImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions) else {
+            return nil
+        }
+        return downsampledImage(from: source, maxPixelSize: maxPixelSize)
+    }
+
+    private static func downsampledImage(_ image: NSImage, maxPixelSize: CGFloat) -> NSImage? {
+        guard let tiff = image.tiffRepresentation,
+              let source = CGImageSourceCreateWithData(tiff as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+            return image.thumbnail(size: NSSize(width: maxPixelSize, height: maxPixelSize))
+        }
+        return downsampledImage(from: source, maxPixelSize: maxPixelSize)
+    }
+
+    private static func downsampledImage(from source: CGImageSource, maxPixelSize: CGFloat) -> NSImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceShouldCacheImmediately: true
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
     }
 }
 

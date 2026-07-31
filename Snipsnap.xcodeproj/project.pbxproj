@@ -260,6 +260,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Snipsnap reads the active tab's URL from your browser so it can organize screenshots into the right project folder.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Snipsnap records your microphone when you enable the mic toggle during screen recordings.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -294,6 +295,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_LSUIElement = YES;
+				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Snipsnap reads the active tab's URL from your browser so it can organize screenshots into the right project folder.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Snipsnap records your microphone when you enable the mic toggle during screen recordings.";
 				LD_RUNPATH_SEARCH_PATHS = (

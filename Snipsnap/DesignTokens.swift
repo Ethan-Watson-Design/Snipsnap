@@ -103,6 +103,9 @@ enum DesignTokens {
         static let panelHoverFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.10))
         static let panelActiveFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.14))
 
+        /// Selected list row in the capture library sidebar. HSL L=93.
+        static let listSelectionFill = neutralSurface(lightness: 0.93)
+
         /// Neutral surface at HSL lightness (achromatic). AppKit HSB brightness matches HSL L when S=0.
         static func neutralSurface(lightness: CGFloat) -> TokenColor {
             TokenColor(ns: NSColor(calibratedHue: 0, saturation: 0, brightness: lightness, alpha: 1))

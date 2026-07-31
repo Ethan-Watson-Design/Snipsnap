@@ -5040,20 +5040,13 @@ final class ToolbarPillView: NSView {
     /// Converts image-pixel coords from the options panel back to canvas space.
     var mapSpotlightRegionFromPanel: ((CGRect) -> CGRect)?
     var spotlightImagePixelSize: CGSize = .zero
-    var onCopy: (() -> Void)?
-    var onSave: (() -> Void)?
 
-    private let showsCopyButton: Bool
-    private let showsSaveButton: Bool
     private let availableTools: [AnnotationTool]
-    private var copyButton: NSButton?
-    private var saveButton: NSButton?
 
     private var toolButtons: [AnnotationTool: ToolHoverButton] = [:]
     private var colorSwatchButton: CircleColorButton!
     private var spotlightOptionsButton: NSButton!
     private var accessorySeparator: NSView!
-    private var trailingSeparator: NSView?
     private let tooltipPanel = ToolTooltipPanel()
     private var tooltipsPrimed = false
     private var drawStyleMenu: DrawStyleMenuPanel!
@@ -5062,9 +5055,12 @@ final class ToolbarPillView: NSView {
     private var colorGridMenu: ColorGridMenuPanel!
     private var customColorPicker: FigmaStyleColorPickerPanel!
     private var backgroundView: NSView!
-    private let pillHeight: CGFloat = 40
-    private let toolButtonSize: CGFloat = 28
+    private let toolButtonSize: CGFloat = 32
+    /// Vertical inset around tool buttons (matches horizontal `toolSectionPadding`).
+    private var pillHeight: CGFloat { toolButtonSize + toolSectionPadding * 2 }
     private let toolButtonCornerRadius = DesignTokens.Radius.md
+    private var toolIconPointSize: CGFloat { toolButtonSize * (14 / 28) }
+    private var accessoryIconPointSize: CGFloat { toolButtonSize * (13 / 28) }
     /// Concentric with tool buttons: container radius − inset = button radius.
     private var pillCornerRadius: CGFloat {
         toolButtonCornerRadius + (pillHeight - toolButtonSize) / 2
@@ -5077,6 +5073,8 @@ final class ToolbarPillView: NSView {
 
     /// When set, dragging is clamped to this rect in the superview's coordinate space.
     var dragBounds: CGRect?
+    /// Tracks whether the user has manually repositioned the toolbar.
+    var hasBeenManuallyRepositioned = false
 
     private let proximityMargin: CGFloat = 16
     private let fadedAlpha: CGFloat = 0.3
@@ -5091,20 +5089,14 @@ final class ToolbarPillView: NSView {
 
     init(
         frame: NSRect,
-        showsCopyButton: Bool = true,
-        showsSaveButton: Bool = false,
         availableTools: [AnnotationTool] = AnnotationTool.videoTools
     ) {
-        self.showsCopyButton = showsCopyButton
-        self.showsSaveButton = showsSaveButton
         self.availableTools = availableTools
         super.init(frame: frame)
         build()
     }
 
     override init(frame: NSRect) {
-        self.showsCopyButton = true
-        self.showsSaveButton = false
         self.availableTools = AnnotationTool.videoTools
         super.init(frame: frame)
         build()
@@ -5223,7 +5215,7 @@ final class ToolbarPillView: NSView {
             btn.bezelStyle = .regularSquare
             btn.isBordered = false
             btn.title = ""
-            let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            let cfg = NSImage.SymbolConfiguration(pointSize: toolIconPointSize, weight: .medium)
             btn.image = NSImage(systemSymbolName: tool.sfSymbol, accessibilityDescription: tool.sfSymbol)?
                             .withSymbolConfiguration(cfg)
             btn.imageScaling = .scaleProportionallyDown
@@ -5263,7 +5255,7 @@ final class ToolbarPillView: NSView {
         let optionsBtn = NSButton(frame: CGRect(x: 0, y: btnY, width: btnSz, height: btnSz))
         optionsBtn.bezelStyle = .regularSquare
         optionsBtn.isBordered = false
-        let optionsCfg = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        let optionsCfg = NSImage.SymbolConfiguration(pointSize: accessoryIconPointSize, weight: .medium)
         optionsBtn.image = NSImage(
             systemSymbolName: "slider.horizontal.3",
             accessibilityDescription: "Spotlight options"
@@ -5277,34 +5269,6 @@ final class ToolbarPillView: NSView {
         optionsBtn.isHidden = true
         addSubview(optionsBtn)
         spotlightOptionsButton = optionsBtn
-
-        if showsCopyButton {
-            let trailing = makeSeparator(at: 0, height: h)
-            addSubview(trailing)
-            trailingSeparator = trailing
-
-            let copyBtn = NSButton(frame: CGRect(x: 0, y: btnY, width: btnSz, height: btnSz))
-            configureToolbarSymbolButton(
-                copyBtn,
-                symbolName: "doc.on.doc",
-                label: "Copy",
-                action: #selector(copyTapped)
-            )
-            addSubview(copyBtn)
-            copyButton = copyBtn
-
-            if showsSaveButton {
-                let saveBtn = NSButton(frame: CGRect(x: 0, y: btnY, width: btnSz, height: btnSz))
-                configureToolbarSymbolButton(
-                    saveBtn,
-                    symbolName: "square.and.arrow.down",
-                    label: "Save",
-                    action: #selector(saveTapped)
-                )
-                addSubview(saveBtn)
-                saveButton = saveBtn
-            }
-        }
 
         layoutAccessoryControls()
         refresh()
@@ -5359,25 +5323,9 @@ final class ToolbarPillView: NSView {
             x += btnSz + 2
         }
 
-        if let trailingSeparator {
-            x += 4
-            trailingSeparator.frame.origin.x = x
-            x += 9
-        }
-
-        if let copyButton {
-            copyButton.frame.origin = CGPoint(x: x, y: btnY)
-            x += btnSz + 2
-        }
-        if let saveButton {
-            x += 2
-            saveButton.frame.origin = CGPoint(x: x, y: btnY)
-            x += btnSz + 2
-        }
-
         let trailingPadding = toolSectionPadding
         let newWidth: CGFloat
-        if !showsAnyAccessory && trailingSeparator == nil {
+        if !showsAnyAccessory {
             // toolsSectionEndX includes accessory gutter; trim to match the left inset.
             newWidth = toolsSectionEndX - 2
         } else {
@@ -5473,6 +5421,10 @@ final class ToolbarPillView: NSView {
         if frame.minX < dragBounds.minX {
             frame.origin.x = dragBounds.minX
         }
+    }
+
+    func clampToDragBoundsIfNeeded() {
+        clampAccessoryFrameToDragBounds()
     }
 
     private func makeSeparator(at x: CGFloat, height: CGFloat) -> NSView {
@@ -5598,37 +5550,10 @@ final class ToolbarPillView: NSView {
         customColorPicker.show(aboveScreenRect: screenRect, initialColor: initial)
     }
 
-    private func configureToolbarSymbolButton(
-        _ button: NSButton,
-        symbolName: String,
-        label: String,
-        action: Selector
-    ) {
-        button.bezelStyle = .regularSquare
-        button.isBordered = false
-        button.title = ""
-        let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
-        button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?
-            .withSymbolConfiguration(cfg)
-        button.imageScaling = .scaleProportionallyDown
-        button.contentTintColor = DesignTokens.Color.primary.ns
-        button.target = self
-        button.action = action
-        button.toolTip = label
-    }
-
-    @objc private func copyTapped() {
-        onCopy?()
-    }
-
-    @objc private func saveTapped() {
-        onSave?()
-    }
-
     // MARK: Refresh
 
     private func refresh() {
-        let cfg = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        let cfg = NSImage.SymbolConfiguration(pointSize: toolIconPointSize, weight: .medium)
         let inactiveTint = DesignTokens.Color.primary.ns
         let activeTint = NSColor.white
         let activeFill = DesignTokens.Color.primary.cg
@@ -5807,6 +5732,7 @@ final class ToolbarPillView: NSView {
         dragStartMouseLocation = event.locationInWindow
         dragStartFrameOrigin = frame.origin
         isRepositionDragging = true
+        hasBeenManuallyRepositioned = true
         NSCursor.closedHand.set()
     }
 
@@ -5888,6 +5814,10 @@ final class AnnotationActionBarView: NSView {
         }
     }
 
+    var foregroundColor: NSColor = .labelColor {
+        didSet { applyForegroundColor() }
+    }
+
     var onSave: (() -> Void)?
     var onCopy: (() -> Void)?
     var onMore: (() -> Void)?
@@ -5928,10 +5858,16 @@ final class AnnotationActionBarView: NSView {
         button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: label)?
             .withSymbolConfiguration(cfg)
         button.imageScaling = .scaleProportionallyDown
-        button.contentTintColor = DesignTokens.Color.primary.ns
+        button.contentTintColor = foregroundColor
         button.target = self
         button.action = action
         button.toolTip = label
+    }
+
+    private func applyForegroundColor() {
+        for button in [saveButton, copyButton, moreButton] {
+            button.contentTintColor = foregroundColor
+        }
     }
 
     private func layoutButtons() {
@@ -5970,6 +5906,11 @@ final class AnnotationActionBarView: NSView {
     @objc private func saveTapped() { onSave?() }
     @objc private func copyTapped() { onCopy?() }
     @objc private func moreTapped() { onMore?() }
+
+    func saveButtonScreenRect(in window: NSWindow) -> NSRect {
+        let rectInWindow = saveButton.convert(saveButton.bounds, to: nil)
+        return window.convertToScreen(rectInWindow)
+    }
 }
 
 // MARK: - AnnotationWindow
@@ -6003,7 +5944,7 @@ final class AnnotationWindow: NSWindow {
 
     // MARK: Entry Point
 
-    static func show(image: NSImage, fileName: String? = nil, captureID: UUID? = nil) {
+    static func show(image: NSImage, fileName: String? = nil, captureID: UUID? = nil, windowInfo: WindowSignature? = nil) {
         DispatchQueue.main.async {
             current = AnnotationWindow(image: image, fileName: fileName, captureID: captureID)
             current?.makeKeyAndOrderFront(nil)
@@ -6054,7 +5995,11 @@ final class AnnotationWindow: NSWindow {
             laysContentBelowTitlebar: true
         )
 
-        titleControl = AnnotationTitlebarTitleControl(title: displayName)
+        let titlebarForeground = titlebarColor.annotationTitlebarForeground
+        titleControl = AnnotationTitlebarTitleControl(
+            title: displayName,
+            foregroundColor: titlebarForeground
+        )
         titleControl.target = self
         titleControl.action = #selector(titleControlTapped)
         AnnotationTitlebarStyle.installCenteredTitle(titleControl, in: self)
@@ -6069,6 +6014,7 @@ final class AnnotationWindow: NSWindow {
         )
 
         actionBar = AnnotationActionBarView(frame: NSRect(x: 0, y: 0, width: 180, height: 28))
+        actionBar.foregroundColor = titlebarForeground
         actionBar.showsSaveButton = captureID != nil
         AnnotationTitlebarStyle.installTrailingAccessory(actionBar, in: self)
 
@@ -6097,9 +6043,7 @@ final class AnnotationWindow: NSWindow {
 
     private func buildLayout() {
         pill = ToolbarPillView(
-            frame: CGRect(x: 0, y: 0, width: 100, height: 40),
-            showsCopyButton: false,
-            showsSaveButton: false,
+            frame: CGRect(x: 0, y: 0, width: 100, height: 44),
             availableTools: AnnotationTool.screenshotTools
         )
 
@@ -6174,11 +6118,15 @@ final class AnnotationWindow: NSWindow {
         updateSpotlightCoordinateMapping()
         updateCanvasStageBackground()
         pill.dragBounds = NSRect(origin: .zero, size: stageSize)
-        pill.frame.origin = ToolbarPillView.defaultOrigin(
-            pillSize: pill.frame.size,
-            in: stageSize,
-            bottomInset: toolbarBottomInset
-        )
+        if pill.hasBeenManuallyRepositioned {
+            pill.clampToDragBoundsIfNeeded()
+        } else {
+            pill.frame.origin = ToolbarPillView.defaultOrigin(
+                pillSize: pill.frame.size,
+                in: stageSize,
+                bottomInset: toolbarBottomInset
+            )
+        }
         bringToolbarToFront(in: container)
         layoutShipItPanel(in: container)
 
@@ -6207,11 +6155,16 @@ final class AnnotationWindow: NSWindow {
         shell.addSubview(container)
 
         container.addSubview(canvas)
-        pill.frame.origin = ToolbarPillView.defaultOrigin(
-            pillSize: pill.frame.size,
-            in: layout.stage,
-            bottomInset: toolbarBottomInset
-        )
+        pill.dragBounds = NSRect(origin: .zero, size: layout.stage)
+        if pill.hasBeenManuallyRepositioned {
+            pill.clampToDragBoundsIfNeeded()
+        } else {
+            pill.frame.origin = ToolbarPillView.defaultOrigin(
+                pillSize: pill.frame.size,
+                in: layout.stage,
+                bottomInset: toolbarBottomInset
+            )
+        }
         container.addSubview(pill, positioned: .above, relativeTo: canvas)
         container.addSubview(shipItPanel, positioned: .above, relativeTo: canvas)
         layoutShipItPanel(in: container)
@@ -6613,13 +6566,11 @@ final class AnnotationWindow: NSWindow {
         }
 
         actionBar.onCopy = { [weak self] in
-            guard let self, self.flattenAndCopy() else { return }
-            ToastWindow.show(message: "Copied to clipboard")
+            self?.performCopyWithToast()
         }
 
         actionBar.onSave = { [weak self] in
-            guard let self, self.flattenAndSave() else { return }
-            ToastWindow.show(message: "Saved to PNG")
+            self?.performSave()
         }
 
         actionBar.onMore = { [weak self] in
@@ -6754,6 +6705,36 @@ final class AnnotationWindow: NSWindow {
         return canvas.flattenedImage(background: stageImage)
     }
 
+    private func performCopyWithToast() {
+        guard flattenAndCopy() else { return }
+        ToastWindow.show(message: "Copied to clipboard")
+    }
+
+    private func titleBarToastAnchorRect() -> NSRect {
+        let titleBarHeight = max(frame.height - contentLayoutRect.height, 28)
+        return NSRect(
+            x: frame.minX,
+            y: frame.maxY - titleBarHeight,
+            width: frame.width,
+            height: titleBarHeight
+        )
+    }
+
+    private func performSave() {
+        guard flattenAndSave(), let captureID else { return }
+        ToastWindow.show(
+            message: "Saved",
+            associatedCaptureID: captureID,
+            actionTitle: "Show in Finder",
+            anchorScreenRect: titleBarToastAnchorRect(),
+            hostWindow: self,
+            onAction: {
+                guard let fileURL = CaptureHistory.shared.fileURL(for: captureID) else { return }
+                NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+            }
+        )
+    }
+
     private func flattenCopyAndClose() {
         flattenAndCopy()
         close()
@@ -6765,13 +6746,19 @@ final class AnnotationWindow: NSWindow {
 final class AnnotationTitlebarTitleControl: NSButton {
     private let maxTitleWidth: CGFloat = 280
 
-    init(title: String) {
+    var foregroundColor: NSColor = .labelColor {
+        didSet { contentTintColor = foregroundColor }
+    }
+
+    init(title: String, foregroundColor: NSColor = .labelColor) {
+        self.foregroundColor = foregroundColor
         super.init(frame: .zero)
         bezelStyle = .inline
         isBordered = false
         font = NSFont.snipsnap(.body)
         lineBreakMode = .byTruncatingTail
         cell?.truncatesLastVisibleLine = true
+        contentTintColor = foregroundColor
         setTitle(title)
         toolTip = "Rename and file settings"
     }
@@ -7132,6 +7119,12 @@ private extension NSColor {
         guard let rgb = usingColorSpace(.sRGB) else { return true }
         let luminance = 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent + 0.0722 * rgb.blueComponent
         return luminance > 0.55
+    }
+
+    var annotationTitlebarForeground: NSColor {
+        isLightAnnotationBackground
+            ? DesignTokens.Color.primary.ns
+            : DesignTokens.Color.textOnPrimary.ns
     }
 }
 

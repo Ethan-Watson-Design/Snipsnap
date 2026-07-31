@@ -34,6 +34,7 @@ final class BackgroundStyleSwatch: NSControl {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: .pointingHand)
     }
@@ -200,6 +201,13 @@ final class ShipItPanelView: NSView {
             height: panelHeight
         )
         contentPanel.frame = NSRect(origin: .zero, size: frame.size)
+        let padding = Self.contentPadding
+        scrollView.frame = NSRect(
+            x: padding,
+            y: padding,
+            width: max(0, frame.width - padding * 2),
+            height: max(0, frame.height - padding * 2)
+        )
         applyPanelShadow()
     }
 
@@ -233,7 +241,6 @@ final class ShipItPanelView: NSView {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.autohidesScrollers = true
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
         contentPanel.addSubview(scrollView)
 
         documentContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -250,12 +257,7 @@ final class ShipItPanelView: NSView {
         stackView.addArrangedSubview(makeBackgroundSwatchRow())
         stackView.addArrangedSubview(makeSideBySideSection())
 
-        let padding = Self.contentPadding
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: contentPanel.topAnchor, constant: padding),
-            scrollView.leadingAnchor.constraint(equalTo: contentPanel.leadingAnchor, constant: padding),
-            scrollView.trailingAnchor.constraint(equalTo: contentPanel.trailingAnchor, constant: -padding),
-            scrollView.bottomAnchor.constraint(equalTo: contentPanel.bottomAnchor, constant: -padding),
             stackView.topAnchor.constraint(equalTo: documentContainer.topAnchor),
             stackView.leadingAnchor.constraint(equalTo: documentContainer.leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: documentContainer.trailingAnchor),
@@ -267,6 +269,13 @@ final class ShipItPanelView: NSView {
 
         refreshBackgroundSwatches()
         refreshSideBySideUI()
+    }
+
+    private func preferredWidthConstraint(for view: NSView) -> NSLayoutConstraint {
+        let constraint = view.widthAnchor.constraint(equalToConstant: Self.contentWidth)
+        // Scrollbars can shrink the clip width; keep this as a preference to avoid conflicts.
+        constraint.priority = .defaultHigh
+        return constraint
     }
 
     private func makeHeaderRow() -> NSView {
@@ -291,13 +300,14 @@ final class ShipItPanelView: NSView {
 
         row.addSubview(label)
         row.addSubview(closeBtn)
+        let preferredWidth = preferredWidthConstraint(for: row)
         NSLayoutConstraint.activate([
             label.leadingAnchor.constraint(equalTo: row.leadingAnchor),
             label.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             closeBtn.trailingAnchor.constraint(equalTo: row.trailingAnchor),
             closeBtn.centerYAnchor.constraint(equalTo: row.centerYAnchor),
             row.heightAnchor.constraint(equalToConstant: 22),
-            row.widthAnchor.constraint(equalToConstant: Self.contentWidth),
+            preferredWidth,
         ])
         return row
     }
@@ -355,18 +365,19 @@ final class ShipItPanelView: NSView {
 
         titleRow.addSubview(title)
         titleRow.addSubview(sideBySideEnableSwitch)
+        let preferredTitleWidth = preferredWidthConstraint(for: titleRow)
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: titleRow.leadingAnchor),
             title.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
             sideBySideEnableSwitch.trailingAnchor.constraint(equalTo: titleRow.trailingAnchor),
             sideBySideEnableSwitch.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
             titleRow.heightAnchor.constraint(equalToConstant: 22),
-            titleRow.widthAnchor.constraint(equalToConstant: Self.contentWidth),
+            preferredTitleWidth,
         ])
 
         sideBySideTilesContainer.translatesAutoresizingMaskIntoConstraints = false
         sideBySideTilesContainer.heightAnchor.constraint(equalToConstant: 128).isActive = true
-        sideBySideTilesContainer.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        preferredWidthConstraint(for: sideBySideTilesContainer).isActive = true
 
         sideBySideSwapButton.title = "Swap Order"
         sideBySideSwapButton.bezelStyle = .rounded

@@ -17,9 +17,9 @@ A free, native-feeling macOS capture tool. Screenshots, screen recording, FigJam
 | **Min macOS** | 13.0 (Ventura) |
 | **Distribution** | Direct (not App Store) |
 | **Pricing** | Free |
-| **Save location** | User picks a root folder during onboarding; Snipsnap auto-organizes into product-named subfolders beneath it (see Dynamic Save Location below) |
-| **Auto-organize analysis** | On-device only — app/window metadata + Vision OCR, escalating to the on-device Foundation Models LLM for naming/categorization when available; no cloud calls, nothing leaves the Mac; falls back to dropping the file in the root folder untouched if analysis can't produce a confident answer |
-| **Auto-organize behavior** | Suggest, user confirms — file saves immediately, a toast chip proposes the folder, one tap to move it |
+| **Save location** | User picks a root folder during onboarding; every capture lands there flat — no folder suggestion or move happens at capture time (see Capture Library — Finder Sync below) |
+| **Organize approach** | **Pivoted 2026-07-11:** no real-time/toast-time folder suggestion. Organizing is a deliberate, post-capture pass that lives in the Capture Library window — rename suggestions, project tagging, and move-into-project, all reviewed/applied by the user, never automatic |
+| **Capture Library** | Becomes a live, two-way view of the actual save-folder tree on disk, not a capped 200-item cache — folders and files shown match Finder exactly, and changes made in either place reflect in the other |
 | **Default output** | Auto-copy to clipboard + save to folder + toast preview |
 | **Toast behavior** | Click toast → opens annotation window |
 | **Recording audio** | Screen only by default; mic opt-in; system audio opt-in |
@@ -83,7 +83,7 @@ Deprioritized for now: tutorial/step-by-step documentation (needs numbered step 
 
 **Two flagship features for v1.0 MVP:**
 1. The screenshot → annotate → share loop above.
-2. **Dynamic Save Location (Auto-Organize)** — on-device analysis of each capture proposes a product-named (sub)folder, so a person capturing across many tools ends up with a self-sorting library instead of a flat dump. Full spec below.
+2. **Capture Library — Finder Sync** *(pivoted 2026-07-11 from real-time Dynamic Save Location / Auto-Organize)* — instead of guessing a folder at capture time, the Capture Library window becomes a live, two-way mirror of the save folder on disk, with rename suggestions, project tagging, and move-into-project handled there as a deliberate post-capture pass. Full spec below.
 
 **Deprioritized for MVP, not off the table:** background images and other secondary capture/output tools (open to adding more here post-MVP).
 
@@ -171,20 +171,22 @@ Spotlight-style text panel that coexists with or replaces the visual Capture Bar
 
 ## Dynamic Save Location (Auto-Organize)
 
+> **⚠️ Superseded 2026-07-11 — see "Capture Library — Finder Sync" below.** Real-time, capture-time folder suggestion is being dropped. Reasoning: the analysis only ever gets one shot, taken under time pressure, off a `WindowSignature` snapshot grabbed the instant the capture fires — thin signal, and it sits in the critical path of the app's fastest, most-used loop (snip → annotate → ship). A deliberate pass *after* capture gets richer signal (multiple captures reviewed together, full image content, no latency budget) without ever risking the annotate/share flow. Everything below this point is kept as a historical record of what was built and why it didn't stick — none of it is being ripped out (the mapping cache, `moveCapture`, `CaptureDestination` model all get reused by the new approach), it's just no longer wired to fire automatically at save time.
+
 **Concept:** instead of every capture landing in one flat folder, Snipsnap figures out *what product or tool* a capture is of and proposes a home for it — a top-level folder per product, nested and reused automatically as more captures come in. The goal: someone doing "screenshot everything I look at across a dozen tools" ends up with a self-sorting folder tree instead of a junk drawer, without ever opening Finder.
 
 **Priority:** MVP, alongside the screenshot-first flow — this is the second flagship feature for v1.0, not a post-launch nice-to-have.
 
-**Analysis approach — on-device only, no cloud calls, nothing leaves the Mac. Tiered, with graceful degradation at every step:**
+**Analysis approach — on-device only, no cloud calls, nothing leaves the Mac. Fully rule-based and deterministic — no LLM tier (removed 2026-07-08, see reworked note below):**
 - **Primary signal — app/window metadata (free, deterministic):** at capture time, read the frontmost app's bundle identifier and window title (ScreenCaptureKit / Accessibility APIs already have this). "Figma," "Google Chrome — Linear," "Xcode" are strong, reliable product names with zero image analysis needed.
+- **Project signal — resolved project/tab name:** for Xcode/JetBrains-style editors, walk the open document's directory up to the nearest `.xcodeproj`/`.xcworkspace`/`.git` ancestor; for Safari/Chrome/Brave/Edge/Arc, ask the browser for its active tab's URL via AppleScript and derive a folder name from the domain + path (e.g. `github.com/you/repo` → "GitHub - repo"). Falls back to window-title parsing when neither is available.
 - **Secondary signal — Vision framework OCR (on-device):** run text recognition on the captured image to pull page/section names, headings, or button labels visible on screen (e.g. "Design System," "Settings," "Pricing"). Used to propose a *subfolder* under the primary product folder, and to disambiguate generic window titles (e.g. a browser tab titled "New Tab").
-- **Reasoning tier — on-device LLM via Apple's Foundation Models framework (Apple Intelligence), when available:** feed the app/window metadata + OCR'd text to the local model and have it pick/generate the folder + subfolder name, rather than relying on raw string matching. Runs entirely on-device via the Swift `FoundationModels` API — no API key, no network call, no per-capture cost. This is what actually makes the naming feel "smart" (e.g. collapsing "New Tab — Google Chrome" + OCR'd page contents into "Chrome / Linear Issue #482" instead of a literal string match).
-- **Availability gate:** Foundation Models requires Apple Intelligence to be supported *and enabled* (Apple Silicon with sufficient RAM, OS version, user opt-in in System Settings). Check availability at analysis time (`SystemLanguageModel.default.availability`) — don't assume it's there.
 - **Fallback chain (never blocks, never errors visibly):**
-  1. Foundation Models available → LLM proposes folder/subfolder from metadata + OCR.
-  2. Foundation Models unavailable/unsupported → fall back to rule-based app-metadata + OCR matching (the original v1 plan, still fully functional on its own).
-  3. Neither signal resolves anything usable (e.g. full-screen capture spanning apps, empty OCR, ambiguous title) → **drop the file into the user's root save folder untouched, no chip shown.** This is the same behavior as today's flat save — auto-organize is additive, never a blocker, and a failed/unavailable analysis should be indistinguishable from the feature not existing.
-- No CoreML classifier needed for v1 — app metadata + OCR text + (optionally) the local LLM covers "what product" and "what part of it" without training or bundling a custom model.
+  1. Mapping cache hit → reuse the previously confirmed folder.
+  2. Resolved project/tab name (Xcode project, browser tab URL) → use it directly.
+  3. Rule-based app-metadata + window-title + OCR matching.
+  4. Neither signal resolves anything usable (e.g. full-screen capture spanning apps, empty OCR, ambiguous title) → **drop the file into the user's root save folder untouched, no chip shown.** This is the same behavior as today's flat save — auto-organize is additive, never a blocker, and a failed analysis should be indistinguishable from the feature not existing.
+- No CoreML classifier and no local LLM needed — app metadata + resolved project/tab name + OCR text covers "what product" and "what part of it" deterministically and instantly, with no "loading" wait.
 
 **Behavior (suggest, user confirms):**
 1. File saves immediately to the root folder the user picked in onboarding — capture speed never waits on analysis.
@@ -196,12 +198,51 @@ Spotlight-style text panel that coexists with or replaces the visual Capture Bar
 
 **Scope:** applies to both screenshots and recordings (same capture pipeline, same metadata available at capture time) — screenshots remain the priority surface to polish first, but there's no separate implementation needed to cover recordings once this ships.
 
-**Data model:** `CaptureDestination { productFolder: String, subfolder: String?, confidence: Double, source: .windowMetadata | .ocr | .localLLM }`. A small on-disk mapping cache (`[WindowSignature: CaptureDestination]`) backs the "remembered" behavior in step 5 — once the LLM (or rules) resolve a mapping once, it's reused without re-running inference.
+> **⚠️ Bug found and fixed (2026-07-07), confirmed working:** initial debug testing showed region captures always classifying as Snipsnap itself, regardless of what was actually on screen (e.g. an Xcode capture came back `bundleID: "ewew.design.Snipsnap"`, `windowTitle: nil`). Root cause: `CaptureClassifier.gatherWindowInfo()` was being called from `finishScreenshot`/`takeScreenshot`'s completion closures, i.e. *after* `RegionSelector`/`CaptureBar` had already called `NSApp.activate`/`makeKeyAndOrderFront` — by then `NSWorkspace.shared.frontmostApplication` correctly but uselessly reports Snipsnap's own panel, not the app the user was actually looking at. Fixed by capturing `WindowSignature` at the earliest possible point in each flow — top of `CaptureBar.show()` (stored in new `CaptureBar.capturedWindowInfo`) and top of `SnipsnapApp.takeScreenshot()` — before any Snipsnap UI takes focus, then threading that captured value through to the `classify` call instead of re-reading frontmost app after capture completes. **Verified against a real build via the debug-print hook — working as intended.**
+>
+> **Follow-up shipped:** `CaptureClassifier` now also resolves, for region/full-screen captures spanning multiple windows, which app occupies the most area of the captured rect (`dominantAppBundleID`/`dominantAppName`, via on-screen window geometry intersected against the final capture rect, excluding Snipsnap's own overlay windows) and a specific project name for that app (`resolvedProjectName`, via `kAXDocumentAttribute` → nearest `.xcodeproj`/`.xcworkspace`/`.git` ancestor, falling back to window-title parsing, falling back to OCR heading extraction). Both signals fed the Foundation Models prompt and the Tier 2 rules directly. Confirmed working via the extended debug print.
+>
+> **Reworked (2026-07-08):** the Foundation Models tier was cut entirely — project resolution needs to be instant and deterministic, not something that "loads." `CaptureClassifier` is now a single rule-based pass: mapping cache → `resolvedProjectName` (see below) → window-title parsing → OCR heading extraction → dominant app name → nil. Also added real browser-tab resolution: for Safari, Chrome, Brave, Edge, and Arc, `resolveProjectName` now asks the browser for its active tab's URL via a one-line AppleScript (`resolveBrowserProjectName`/`runAppleScript` in `CaptureClassifier.swift`) instead of parsing the window title text. The URL's host + first path segment(s) are turned into a folder name via `projectName(fromHost:path:)` — e.g. `github.com/you/repo` → "GitHub - repo", `linear.app/acme/issue/...` → "Linear - acme", unrecognized hosts fall back to a capitalized domain label, `localhost`/`127.0.0.1` → "Localhost". Requires one-time Automation permission (new `NSAppleEventsUsageDescription` in the Xcode build settings); if the user hasn't granted it yet, or the AppleScript fails for any reason, resolution silently falls back to window-title parsing exactly as before — never blocks, never errors visibly. `CaptureDestination.Source.localLLM` is kept as an enum case only so any previously-cached `mappings.json` entries still decode.
+
+**Data model:** `CaptureDestination { productFolder: String, subfolder: String?, confidence: Double, source: .windowMetadata | .ocr | .localLLM }` (`.localLLM` kept only so old cached mappings still decode; nothing produces it anymore). A small on-disk mapping cache (`[WindowSignature: CaptureDestination]`) backs the "remembered" behavior in step 5 — once rules resolve a mapping, it's reused without re-running inference.
 
 **Open questions:**
 - Whether "no confident answer" should still drop a silent file in the root folder (current lean, see fallback chain above) vs. showing an explicit "Unsorted" folder chip — leaning toward silent root-drop so a cold/unavailable model never degrades the base experience.
 - Whether the folder-chip mapping cache should be editable/visible in Settings (a simple list of "Figma → Design System" rules the user can rename or delete).
 - Latency budget for the LLM tier — needs to resolve within the toast's visible window (~4s) or the chip should simply not appear rather than appearing late.
+
+---
+
+## Capture Library — Finder Sync (Post-Capture Organize)
+
+**Added 2026-07-11**, replacing the real-time Auto-Organize toast chip above as flagship feature #2.
+
+**Concept:** the Capture Library window (`CaptureLibraryWindow.swift`) stops being a capped 200-item "recents" cache and becomes a live, two-way mirror of the actual save-folder tree on disk. What you see in the library sidebar is exactly what's in Finder at the root folder you picked in onboarding — same folders, same files, same names — because it's reading (and writing) the same files Finder is, not a separate index. Organizing a capture into a project happens here, deliberately, after the fact — never automatically at save time.
+
+**Why here, not at capture time:** captures already save as real PNG/MP4 files under `AppSettings.destinationFolderURL`, and `CaptureHistory` already does real `FileManager` moves and renames when a capture is organized or renamed. There's only one copy of the data — the library window just needs to read the same directory tree Finder reads, live, instead of relying on its own capped manifest.
+
+**Three things the library adds:**
+1. **Suggested renames** — for captures still sitting on their default `Snipsnap YYYY-MM-DD HH-mm-ss` name, the library can propose a more descriptive name (derived from window/project signal already captured, or an image-content pass — see Analysis approach below). Shown inline per-item or as a batch review list; user accepts, edits, or dismisses each suggestion. Nothing renames itself.
+2. **Project tagging** — a capture (or a multi-select batch) can be tagged with a project name. Tags are just the folder-mapping concept already built (`CaptureDestination`, `CaptureDestinationMappingCache`) surfaced as an explicit user action instead of an inferred toast chip.
+3. **Reorganize / move into project** — drag-and-drop within the library, or "move selected to…" on a batch, moves the underlying files into a project folder (created on demand under the root), reusing `AutoOrganizer.moveCapture` / `CaptureHistory.moveCapture`, which already do this via real `FileManager` operations.
+
+**What "Finder sync" requires, concretely (none of this is a rewrite, all additive):**
+- **Live directory scan** — walk the actual save-folder tree instead of relying solely on the 200-item manifest, so folders/files added or moved outside Snipsnap (i.e. directly in Finder) show up.
+- **Filesystem watcher (FSEvents)** — so changes made in real Finder while the library is open update live, and changes made in the library appear instantly in Finder. This is the actual "sync" — there's no separate store to reconcile, just one filesystem being watched from both sides.
+- **Tree/outline UI** — the sidebar's flat `List` becomes a folder-aware `OutlineGroup`/tree view (still `NavigationSplitView`-based), so project folders and their contents are browsable, not just a flat recency-sorted list.
+- **Reconciling the manifest with the scan** — files that exist on disk but were never added via `CaptureHistory.add` (e.g. moved in from Finder, or from before the cache trimmed them) need a path, not just an id, as their identity — so the tree view can show them even without a manifest entry.
+
+**Analysis approach — open question, not locked:** what powers rename suggestions and project-tag suggestions. Since this no longer needs to resolve instantly (it's not blocking a toast anymore), a real model tier is back on the table, discussed but not decided:
+- **Apple Intelligence (Foundation Models framework, WWDC 2026)** — now supports multimodal prompts (image input) fully on-device, plus Vision-backed OCR tools. Free, private, no network, no key management — the natural fit given `CaptureClassifier` already leans on on-device Vision OCR. Gated on Apple Intelligence–capable hardware + a very recent OS; likely still stabilizing post-WWDC26 as of this writing.
+- **BYOK cloud fallback for everyone else** — never bundle a developer-paid API key (unbounded per-user cost for a free app with no billing infrastructure). If cloud analysis is offered, user supplies their own key. Gemini's free tier covers image understanding with generous limits (not just Flash generation) and is a reasonable free default; Claude API sits alongside as a paid, higher-quality option for users who want it.
+- Whichever tier resolves it, output is always a *suggestion* surfaced in the library, never applied without a tap — same "suggest, user confirms" principle as the original Auto-Organize spec, just relocated from the toast to the library.
+
+**Data model / plumbing reused as-is:** `CaptureDestination`, `CaptureDestinationMappingCache`, `AutoOrganizer.moveCapture`, `CaptureHistory.moveCapture`/`renameCapture` — all already do exactly what this needs; the change is *when* and *where* they're invoked (user-driven, in the library) rather than *what* they do.
+
+**Open questions:**
+- Batch review UI shape — a dedicated "review suggestions" pane/sheet vs. inline affordances per row in the tree.
+- Whether project tags are strictly folder-based (tag = folder, matching today's model) or a separate lighter-weight tag that doesn't require a move — leaning folder-based for v1 since it maps directly to what already exists.
+- Which analysis tier ships first — likely start with the existing deterministic on-device signal (reuse of `CaptureClassifier`, just repointed at "suggest" instead of "auto-apply at save"), with Apple Intelligence / BYOK cloud layered in once the Finder-sync UI itself is solid.
 
 ---
 
@@ -310,7 +351,7 @@ All three are independent. Snipsnap asks for mic and system audio permissions on
 | UserDefaults | Hotkey preferences, settings |
 | Vision (on-device) | OCR text extraction for Auto-Organize subfolder suggestions (and future scrolling-capture OCR) |
 | Accessibility / NSWorkspace | Frontmost app bundle ID + window title at capture time — primary Auto-Organize signal |
-| Foundation Models (on-device, Apple Intelligence) | Optional reasoning tier for Auto-Organize — turns metadata + OCR text into a smarter folder/subfolder name; checked for availability, falls back gracefully when absent |
+| AppleScript (NSAppleScript / Apple Events) | Reads the active tab URL from Safari/Chrome/Brave/Edge/Arc for browser-based project resolution — one-time Automation permission, silent fallback to window-title parsing if denied |
 
 ---
 
@@ -328,6 +369,8 @@ Snipsnap/
 ├── CaptureBar.swift              ✅ Floating capture mode panel (⌘6), all modes + camera/mic/audio toggles
 ├── CaptureHistory.swift          ✅ In-memory + on-disk capture history, JSON manifest
 ├── CaptureLibraryWindow.swift    ✅ NavigationSplitView history panel — sidebar list + detail preview
+│                                     🔜 pivoting to a live Finder-synced tree (FSEvents watcher, folder
+│                                     outline, rename/tag/move-into-project UI) — see Capture Library spec
 ├── SettingsWindow.swift          ✅ Save location picker, read-only shortcut badges
 ├── ShipItPanel.swift             ✅ Undocumented until now — recording export panel: side-by-side compare,
 │                                     background-style swatches for the recording composite
@@ -336,10 +379,11 @@ Snipsnap/
 ├── AudioRingBuffer.swift         # AVAudioEngine tap → circular buffer in RAM
 ├── ClipEngine.swift              # Flush buffer → M4A on "clip that"
 ├── CommandBar.swift              # Future: Spotlight-style text command panel
-├── CaptureClassifier.swift       # MVP: app/window metadata + Vision OCR → CaptureDestination suggestion,
-│                                     escalating to on-device Foundation Models LLM when available, else
-│                                     falling back to rules, else falling back to root folder (no chip)
-└── AutoOrganizer.swift           # MVP: folder chip, create-on-demand nesting, mapping cache
+├── CaptureClassifier.swift       ✅ Deterministic classifier: mapping cache → resolved project/tab name
+│                                     (Xcode project ancestor, browser tab URL via AppleScript) → Vision OCR →
+│                                     rule-based bundle ID/window-title matching → nil. No LLM tier — never "loads."
+└── AutoOrganizer.swift           # ⚠️ real-time toast-chip wiring superseded 2026-07-11; `moveCapture` /
+                                     mapping-cache logic is reused by the Capture Library instead
 ```
 
 **Info.plist — required keys:**
@@ -411,18 +455,33 @@ No onboarding exists yet. First launch silently falls back to Desktop for save l
 - [ ] Don't proceed to the next step until the prior permission is granted (poll + retry)
 - [ ] Save folder step: show a picker with a suggested default (~/Desktop or ~/Screenshots), let user change it, persist to `AppSettings`
 
-### v0.9 — Dynamic Save Location (Auto-Organize)
+### v0.9 — Dynamic Save Location (Auto-Organize) — superseded 2026-07-11
+Real-time toast-chip organizing is no longer the plan (see pivot note in the spec section above). Work already done here isn't wasted — `CaptureClassifier`'s signal-gathering and `CaptureDestinationMappingCache` carry forward into the Capture Library's suggestion engine, just no longer auto-firing at save time.
+- [x] `CaptureClassifier.swift` — read frontmost app bundle ID + window title at capture time (`gatherWindowInfo()`, AXUIElement-based)
+- [x] Vision OCR pass on the captured image for subfolder signal (page/section names, headings) — `recognizeText(in:)`
+- [x] ~~Foundation Models availability check + local LLM call~~ — **removed 2026-07-08**: the LLM tier added latency ("loading") and was replaced with deterministic project resolution (Xcode project ancestor, browser tab URL) instead.
+- [x] Fallback chain implemented and **verified working end-to-end via debug print**: cache → resolved project/tab name → rule-based metadata/OCR matching (~35 known bundle IDs + window-title parsing) → nil
+- [x] Frontmost-app timing bug fixed (see deviation note above) and confirmed correct on a real build
+- [x] Dominant-app-by-capture-area resolution for region/full-screen captures spanning multiple windows, plus project name resolution (`kAXDocumentAttribute` → project root, falling back to title parsing → OCR heading) — confirmed working via debug print
+- [x] `classify()` already invoked post-capture in `SnipsnapApp.swift:takeScreenshot` and `CaptureBar.swift:finishScreenshot` (debug-only — prints result, no UI yet)
+- [x] Mapping cache stub so confirmed product → folder choices are remembered without re-running OCR or the LLM (`CaptureDestinationMappingCache`) — read path done; write path (`confirm`) now gets called from the Capture Library's tag/move actions instead of a toast-chip tap
+- [x] ~~`AutoOrganizer.swift` — folder chip on toast~~ — **dropped**. **Confirmed removed 2026-07-12**: `AnnotationWindow.swift`'s save action is now a plain `performSave()` (renamed from `performSaveAndShowOrganizeToast()`) — just `flattenAndSave()` + the "Saved to PNG" toast. `organizeSuggestionPanel`, the `AnnotationOrganizeSuggestionPanel` class, and the `AutoOrganizer.registerCaptureContext` call in `show(...)` are all gone. `AutoOrganizer.swift`/`CaptureClassifier.swift`/`CaptureHistory.swift` themselves are untouched — `moveCapture` plumbing is still there, just waiting to be called from the Capture Library instead
+
+### v0.9 — Capture Library — Finder Sync (replaces Auto-Organize toast, added 2026-07-11)
 **MVP flagship feature #2**, alongside the screenshot loop — see full spec above. Not started.
-- [ ] `CaptureClassifier.swift` — read frontmost app bundle ID + window title at capture time
-- [ ] Vision OCR pass on the captured image for subfolder signal (page/section names, headings)
-- [ ] Foundation Models availability check (`SystemLanguageModel.default.availability`) + local LLM call to turn metadata + OCR text into a folder/subfolder proposal
-- [ ] Fallback chain: LLM → rule-based metadata/OCR matching → silent drop into root folder (no chip) — verify each tier degrades without blocking capture or showing an error
-- [ ] `AutoOrganizer.swift` — folder chip on toast, create-on-demand nesting under the user's root save folder
-- [ ] Mapping cache so confirmed product → folder choices are remembered without re-running OCR or the LLM
-- [ ] Decide whether the mapping cache is user-editable in Settings
+- [ ] Live directory scan of the save-folder tree (replace/augment the capped 200-item manifest read)
+- [ ] FSEvents watcher — library reflects external Finder changes live, and vice versa
+- [ ] Sidebar becomes a folder-aware tree/outline view instead of a flat recency list
+- [ ] Reconcile manifest entries with on-disk files that have no manifest id (path-based identity fallback)
+- [ ] Rename-suggestion UI — inline or batch review, accept/edit/dismiss per item, nothing auto-renames
+- [ ] Project tagging UI — single or multi-select, backed by the existing `CaptureDestination` model
+- [ ] Move-into-project UI — drag-and-drop and/or "move selected to…", reusing `AutoOrganizer.moveCapture` / `CaptureHistory.moveCapture`
+- [ ] Decide analysis tier for suggestions: start with existing deterministic on-device signal vs. layering in Apple Intelligence (on-device multimodal, WWDC26) and/or BYOK cloud (Gemini free tier / Claude API) — see Analysis approach in the spec above, undecided
+- [ ] Decide whether the mapping cache / tag list is user-editable in Settings
+- [ ] Compile-check on an actual Xcode/macOS toolchain happens on the user's machine directly — this environment (Linux sandbox) still has no Swift/Xcode available for any future edits made here
 
 ### v1.0 — Launch
-**MVP gate is the screenshot loop plus Auto-Organize** (capture → annotate → share as "look at this" / "here's why", landing in a self-sorting folder). Recording, camera bubble, and background tools are already built and keep shipping, but none of them block launch.
+**MVP gate is the screenshot loop plus the Capture Library / Finder Sync** (capture → annotate → share as "look at this" / "here's why", with organizing handled as a deliberate post-capture pass in a Finder-synced library instead of an automatic real-time guess). Recording, camera bubble, and background tools are already built and keep shipping, but none of them block launch.
 - [ ] Full screen + window screenshot modes wired up as **global hotkeys** (⌘⇧1, ⌘⇧3) — the capture logic itself is done (`CaptureBar` modes work today via ⌘6 → click); only the dedicated hotkey binding is missing
 - [ ] App icon (`snipsnap-icon.svg` exists at repo root, not yet wired into `Assets.xcassets/AppIcon.appiconset`, which is still empty of icon files)
 - [ ] Notarization

@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "sweetpad",
+      "action": "launch",
+      "problemMatcher": ["$sweetpad-watch"],
+      "label": "sweetpad: launch",
+      "detail": "Build and launch Snipsnap",
+      "isBackground": true,
+      "scheme": "Snipsnap",
+      "configuration": "Debug"
+    },
+    {
+      "type": "sweetpad",
+      "action": "build",
+      "problemMatcher": ["$sweetpad-watch"],
+      "label": "sweetpad: build",
+      "detail": "Build Snipsnap without launching",
+      "scheme": "Snipsnap",
+      "configuration": "Debug"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "sweetpad.build.xcodeWorkspacePath": "Snipsnap.xcodeproj/project.xcworkspace",
+  "sweetpad.build.derivedDataPath": ".build",
+  "sweetpad.build.schemes.include": ["Snipsnap"],
+  "sweetpad.buildServer.provider": "sweetpad",
+  "sweetpad.build.autoGenerateBuildServerConfig": true,
+  "sweetpad.build.xcbeautifyEnabled": false,
+  "swift.sourcekit-lsp.trace.server": "off"
+}

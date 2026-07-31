@@ -34,6 +34,84 @@ enum CaptureMode: Equatable {
     }
 }
 
+// MARK: - CaptureBarCloseButton
+
+private final class CaptureBarCloseButton: NSControl {
+    private let highlightLayer = CALayer()
+    private let iconView = NSImageView()
+    private var isHovered = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        toolTip = "Close"
+        setAccessibilityLabel("Close")
+
+        highlightLayer.cornerRadius = CaptureBarStyle.hoverCornerRadius
+        layer?.addSublayer(highlightLayer)
+
+        let cfg = NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        iconView.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Close")?
+            .withSymbolConfiguration(cfg)
+        iconView.imageScaling = .scaleProportionallyDown
+        iconView.contentTintColor = .secondaryLabelColor
+        addSubview(iconView)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach { removeTrackingArea($0) }
+        addTrackingArea(NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        updateLook()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        updateLook()
+    }
+
+    override func layout() {
+        super.layout()
+        let iconSide: CGFloat = 14
+        iconView.frame = NSRect(
+            x: (bounds.width - iconSide) / 2,
+            y: (bounds.height - iconSide) / 2,
+            width: iconSide,
+            height: iconSide
+        )
+        highlightLayer.frame = bounds.insetBy(dx: 2, dy: 8)
+        updateLook()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let window, event.window == window else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard bounds.contains(point) else { return }
+        _ = target?.perform(action, with: self)
+    }
+
+    private func updateLook() {
+        highlightLayer.backgroundColor = isHovered
+            ? CaptureBarStyle.hoverFill.cgColor
+            : CGColor.clear
+    }
+}
+
 // MARK: - CaptureBarModeButton
 
 private final class CaptureBarModeButton: NSControl {
@@ -423,6 +501,12 @@ final class CaptureBar: NSPanel {
     /// True while the capture bar is intentionally on screen (set before async preview work).
     private(set) static var isPresented = false
 
+    /// Frontmost app/window captured at the moment the bar is invoked (⌘6), before Snipsnap's
+    /// own panel steals focus. Auto-Organize classification must use this, not a fresh
+    /// `NSWorkspace.shared.frontmostApplication` read taken after capture — by then Snipsnap
+    /// itself is frontmost and classification would describe Snipsnap instead of the source app.
+    private(set) static var capturedEarlySignals: EarlyCaptureSignals?
+
     /// Read-only access to the active bar (nil until first `show()` call).
     static var shared: CaptureBar? { instance }
 
@@ -475,6 +559,10 @@ final class CaptureBar: NSPanel {
     // MARK: - Entry Points
 
     static func show() {
+        // Must run before anything below touches focus — this is the last point where
+        // NSWorkspace.shared.frontmostApplication still reflects the app the user was
+        // actually looking at, rather than Snipsnap's own panel.
+        capturedEarlySignals = CaptureClassifier.gatherEarlyCaptureSignals()
         DispatchQueue.main.async {
             if instance == nil {
                 instance = CaptureBar()
@@ -563,14 +651,16 @@ final class CaptureBar: NSPanel {
 
     private static func computeBarLayout() -> BarLayout {
         let hPad: CGFloat = 14
+        let closeW: CGFloat = 32
         let btnW: CGFloat = 58
         let sepPad: CGFloat = 8
         let sepW: CGFloat = 1
         let captureW: CGFloat = 82
 
         let allButtonCount = 6
-        let separatorCount = 2
+        let separatorCount = 3
         let totalW = hPad
+            + closeW
             + CGFloat(allButtonCount) * btnW
             + CGFloat(separatorCount) * (sepW + sepPad * 2)
             + captureW + hPad
@@ -697,6 +787,19 @@ final class CaptureBar: NSPanel {
 
         var x = hPad
         let modeBtnY: CGFloat = (barH - btnH) / 2
+        let closeW: CGFloat = 32
+        let sepInset: CGFloat = 14
+
+        let closeBtn = CaptureBarCloseButton(frame: CGRect(x: x, y: modeBtnY, width: closeW, height: btnH))
+        closeBtn.target = self
+        closeBtn.action = #selector(closeTapped)
+        vfx.addSubview(closeBtn)
+        x += closeW + sepPad
+
+        let closeSep = NSBox(frame: CGRect(x: x, y: sepInset, width: sepW, height: barH - sepInset * 2))
+        closeSep.boxType = NSBox.BoxType.separator
+        vfx.addSubview(closeSep)
+        x += sepW + sepPad
 
         for group in groups {
             for spec in group {
@@ -709,7 +812,6 @@ final class CaptureBar: NSPanel {
                 x += btnW
             }
             x += sepPad
-            let sepInset: CGFloat = 14
             let sep = NSBox(frame: CGRect(x: x, y: sepInset, width: sepW, height: barH - sepInset * 2))
             sep.boxType = NSBox.BoxType.separator
             vfx.addSubview(sep)
@@ -803,6 +905,10 @@ final class CaptureBar: NSPanel {
 
     // MARK: - Actions
 
+    @objc private func closeTapped() {
+        CaptureBar.dismiss()
+    }
+
     @objc private func modeTapped(_ sender: NSControl) {
         guard let btn = sender as? CaptureBarModeButton else { return }
         selectedMode = btn.mode
@@ -822,7 +928,7 @@ final class CaptureBar: NSPanel {
             CaptureBar.dismiss()
             ScreenshotEngine.captureRegion(rect) { img in
                 guard let img else { return }
-                CaptureBar.finishScreenshot(img)
+                CaptureBar.finishScreenshot(img, captureRect: rect)
             }
 
         case .screenshotWindow:
@@ -835,7 +941,7 @@ final class CaptureBar: NSPanel {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         ScreenshotEngine.captureWindow(windowID, background: recBackground) { img in
                             guard let img else { return }
-                            CaptureBar.finishScreenshot(img)
+                            CaptureBar.finishScreenshot(img, captureRect: nil)
                         }
                     }
                 }
@@ -847,7 +953,7 @@ final class CaptureBar: NSPanel {
             CaptureBar.dismiss()
             ScreenshotEngine.captureRegion(rect) { img in
                 guard let img else { return }
-                CaptureBar.finishScreenshot(img)
+                CaptureBar.finishScreenshot(img, captureRect: rect)
             }
 
         case .recordWindow:
@@ -928,14 +1034,24 @@ final class CaptureBar: NSPanel {
         )
     }
 
-    private static func finishScreenshot(_ image: NSImage) {
+    private static func finishScreenshot(_ image: NSImage, captureRect: CGRect?) {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.writeObjects([image])
         let entry = CaptureHistory.shared.add(.screenshot(image))
         (NSApp.delegate as? AppDelegate)?.rebuildMenu()
-        ToastWindow.show(image: image) {
-            AnnotationWindow.show(image: image, fileName: entry?.displayName, captureID: entry?.id)
+        let early = capturedEarlySignals ?? CaptureClassifier.gatherEarlyCaptureSignals()
+        let windowInfo = CaptureClassifier.completeWindowSignature(from: early, captureRect: captureRect)
+        if let captureID = entry?.id {
+            AutoOrganizer.registerCaptureContext(captureID: captureID, windowInfo: windowInfo)
+        }
+        ToastWindow.show(image: image, associatedCaptureID: entry?.id) {
+            AnnotationWindow.show(
+                image: image,
+                fileName: entry?.displayName,
+                captureID: entry?.id,
+                windowInfo: windowInfo
+            )
         }
     }
 

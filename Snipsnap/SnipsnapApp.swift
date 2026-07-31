@@ -12,31 +12,67 @@ import AVFoundation
 class AppDelegate: NSObject, NSApplicationDelegate {
     private static let menuBarIconImage: NSImage = {
         let side: CGFloat = 16
+        let scale: CGFloat = 2
+        let pixelSide = Int(side * scale)
         let cornerRadius: CGFloat = 5
 
-        let image = NSImage(size: NSSize(width: side, height: side), flipped: true) { rect in
-            let background = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-            NSColor(white: 0.94, alpha: 1).setFill()
-            background.fill()
-
-            let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-            let text = NSAttributedString(
-                string: "\u{2042}", // ⁂ asterism
-                attributes: [.font: font, .foregroundColor: NSColor.black]
-            )
-            let textSize = text.size()
-            let origin = NSPoint(
-                x: (side - textSize.width) / 2,
-                y: (side - textSize.height) / 2
-            )
-
-            NSGraphicsContext.saveGraphicsState()
-            NSGraphicsContext.current?.compositingOperation = .destinationOut
-            text.draw(at: origin)
-            NSGraphicsContext.restoreGraphicsState()
-
-            return true
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelSide,
+            pixelsHigh: pixelSide,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return NSImage(
+                systemSymbolName: "rectangle.dashed.badge.record",
+                accessibilityDescription: "Snipsnap"
+            ) ?? NSImage()
         }
+        bitmap.size = NSSize(width: side, height: side)
+
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            // If we can't get a context to draw into, bail out to the SF Symbol fallback
+            // instead of silently returning a blank/garbage bitmap.
+            return NSImage(
+                systemSymbolName: "rectangle.dashed.badge.record",
+                accessibilityDescription: "Snipsnap"
+            ) ?? NSImage()
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+
+        let rect = NSRect(x: 0, y: 0, width: side, height: side)
+        NSColor.clear.setFill()
+        NSBezierPath(rect: rect).fill()
+
+        let background = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
+        NSColor(white: 1.0, alpha: 0.88).setFill()
+        background.fill()
+
+        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+        let text = NSAttributedString(
+            string: "*:",
+            attributes: [.font: font, .foregroundColor: NSColor.black]
+        )
+        let textSize = text.size()
+        let origin = NSPoint(
+            x: (side - textSize.width) / 2,
+            y: (side - textSize.height) / 2
+        )
+
+        context.compositingOperation = .destinationOut
+        text.draw(at: origin)
+        NSGraphicsContext.restoreGraphicsState()
+
+        let image = NSImage(size: NSSize(width: side, height: side))
+        image.addRepresentation(bitmap)
         image.isTemplate = false
         return image
     }()
@@ -96,7 +132,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     let thumb = NSImage(cgImage: cgImage, size: .zero)
                     CaptureHistory.shared.add(.recording(url: url, thumbnail: thumb))
                     self.rebuildMenu()
-                    ToastWindow.show(image: thumb) {
+                    ToastWindow.show(image: thumb, associatedCaptureID: nil) {
                         VideoAnnotationWindow.show(url: url, thumbnail: thumb)
                     }
                 }
@@ -450,6 +486,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func takeScreenshot() {
+        // Captured before RegionSelector.show() below — that call activates Snipsnap's own
+        // overlay window, so any read of NSWorkspace.shared.frontmostApplication taken after
+        // this point would describe Snipsnap instead of whatever app the user was looking at.
+        let earlySignals = CaptureClassifier.gatherEarlyCaptureSignals()
         DispatchQueue.main.async {
             RegionSelector.show { rect in
                 guard let rect else { return }
@@ -460,8 +500,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     pasteboard.writeObjects([image])
                     let entry = CaptureHistory.shared.add(.screenshot(image))
                     self.rebuildMenu()
-                    ToastWindow.show(image: image) {
-                        AnnotationWindow.show(image: image, fileName: entry?.displayName, captureID: entry?.id)
+                    let windowInfo = CaptureClassifier.completeWindowSignature(
+                        from: earlySignals,
+                        captureRect: rect
+                    )
+                    if let captureID = entry?.id {
+                        AutoOrganizer.registerCaptureContext(captureID: captureID, windowInfo: windowInfo)
+                    }
+                    ToastWindow.show(image: image, associatedCaptureID: entry?.id) {
+                        AnnotationWindow.show(
+                            image: image,
+                            fileName: entry?.displayName,
+                            captureID: entry?.id,
+                            windowInfo: windowInfo
+                        )
                     }
                 }
             }

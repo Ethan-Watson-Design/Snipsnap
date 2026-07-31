@@ -1,6 +1,11 @@
 {
   "version": 1,
   "hooks": {
+    "beforeSubmitPrompt": [
+      {
+        "command": ".cursor/hooks/check-build-run.sh"
+      }
+    ],
     "stop": [
       {
         "command": ".cursor/hooks/xcode-run.sh",

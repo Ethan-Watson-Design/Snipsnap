@@ -293,7 +293,7 @@ final class VideoAnnotationWindow: NSWindow {
 
     private let videoAreaHeight: CGFloat = 492
     private let timelineRowHeight: CGFloat = 44
-    private let toolbarRowHeight: CGFloat = 40
+    private let toolbarRowHeight: CGFloat = 44
     private let toolbarBottomInset: CGFloat = 12
     private let timelineHorizontalInset: CGFloat = 12
 
@@ -367,8 +367,7 @@ final class VideoAnnotationWindow: NSWindow {
 
     private func buildLayout(windowSize: NSSize) {
         pill = ToolbarPillView(
-            frame: CGRect(x: 0, y: 0, width: 100, height: 40),
-            showsCopyButton: false,
+            frame: CGRect(x: 0, y: 0, width: 100, height: 44),
             availableTools: AnnotationTool.videoTools
         )
 

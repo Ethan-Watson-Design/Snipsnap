@@ -2022,7 +2022,8 @@ private struct VideoPreviewRepresentable: NSViewRepresentable {
 
     func makeNSView(context: Context) -> AVPlayerView {
         let view = LibraryPreviewPlayerView()
-        view.controlsStyle = .inline
+        // Avoid AVKit Tahoe bug: inline glass volume controls have unsatisfiable width constraints.
+        view.controlsStyle = .floating
         view.videoGravity = .resizeAspect
         context.coordinator.bind(url: url, to: view)
         return view

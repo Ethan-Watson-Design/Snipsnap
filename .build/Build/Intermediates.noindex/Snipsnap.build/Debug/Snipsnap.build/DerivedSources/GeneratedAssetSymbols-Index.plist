@@ -5,7 +5,18 @@
 	<key>colors</key>
 	<array/>
 	<key>images</key>
-	<array/>
+	<array>
+		<dict>
+			<key>catalogPath</key>
+			<string>/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/Assets.xcassets</string>
+			<key>objcSymbol</key>
+			<string>ACImageNameMenuBarIcon</string>
+			<key>relativePath</key>
+			<string>./MenuBarIcon.imageset</string>
+			<key>swiftSymbol</key>
+			<string>menuBarIcon</string>
+		</dict>
+	</array>
 	<key>symbols</key>
 	<array/>
 </dict>

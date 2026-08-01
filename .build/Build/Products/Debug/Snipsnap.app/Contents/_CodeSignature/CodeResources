@@ -6,11 +6,39 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		CGG4MG/QLUEWtO/GeEoF0ePQnt4=
+		ah9I5jD2dtlVrTvkcYVDwoKquCQ=
 		</data>
 		<key>Resources/Assets.car</key>
 		<data>
-		zscOa/dBSFN7IPa+OYTQHkbZ3LM=
+		JUZUGlZPFAOEhNvTr2KAAdxgwl8=
+		</data>
+		<key>Resources/Geist-Bold.ttf</key>
+		<data>
+		Ym+HXX5T5dkjbveBjYdE+wUkbeY=
+		</data>
+		<key>Resources/Geist-Medium.ttf</key>
+		<data>
+		F4uAy7iuL5VuRFTwpeoPFAT1KjY=
+		</data>
+		<key>Resources/Geist-Regular.ttf</key>
+		<data>
+		YcShIoQnCls6kKuUHjhmiMvP8D4=
+		</data>
+		<key>Resources/Geist-SemiBold.ttf</key>
+		<data>
+		r+o1PxVjLuphh2yhlOK+VV1yv7A=
+		</data>
+		<key>Resources/GeistMono-Medium.ttf</key>
+		<data>
+		XZb3lZv7L/HyAKWeb2BNoUCHUHQ=
+		</data>
+		<key>Resources/GeistMono-Regular.ttf</key>
+		<data>
+		iWRThEBnXaru2EnSlk5Xs1RXB18=
+		</data>
+		<key>Resources/OFL.txt</key>
+		<data>
+		zPC4yAn2jHf76uNfu6SYhUuKgTw=
 		</data>
 	</dict>
 	<key>files2</key>
@@ -19,7 +47,7 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			IgKc0qyUVeOfXNxpAJnWy+hThX8=
+			bTMV6D2CWOUCd2egS6CG8AVfhbU=
 			</data>
 			<key>requirement</key>
 			<string>identifier "Snipsnap.debug" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: ethanwatsonj88@gmail.com (556ZG447JB)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>
@@ -37,14 +65,63 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			YmdZ1rwdVrQQUAdP+WU3ltQgK6OSH5XOg6zDzMNd+V0=
+			3OmGeCnPODTGHLh9HJLc+U4GW//Fug7FZEo9WQFDSL4=
 			</data>
 		</dict>
 		<key>Resources/Assets.car</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			3Yo4EcyWKJULuTHwGtcDT8iPAkbHHQdc7k6PlPcK1lg=
+			ytgBeNTYUj69O1fmexrsh/3vrEVl6MVUPOlvVi3NTm0=
+			</data>
+		</dict>
+		<key>Resources/Geist-Bold.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			6Ga0I7dVIzyui85qN1Gfb+Ywvpdy+gj8MRS/8VvIWA8=
+			</data>
+		</dict>
+		<key>Resources/Geist-Medium.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			AJDgBHJfb2S4QXFbQWeSBYD4g/z5tn/G10QIkQP+wQE=
+			</data>
+		</dict>
+		<key>Resources/Geist-Regular.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			XIlo6vuYpMT0cDPa8p444oSm8qgusBfRcasED+fEthU=
+			</data>
+		</dict>
+		<key>Resources/Geist-SemiBold.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			YS7JjfM5NTVPOegeVBAWVpYatuVUn2S2PrV4aLp7q40=
+			</data>
+		</dict>
+		<key>Resources/GeistMono-Medium.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			kLFXEdw3ebLmTor/UigVTdAZqQvOSUdUnEqKikPyrCU=
+			</data>
+		</dict>
+		<key>Resources/GeistMono-Regular.ttf</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			QtitLmECOOZOir/N4wN8Y/eFCnOSh0K3q3Ip2Je8sVU=
+			</data>
+		</dict>
+		<key>Resources/OFL.txt</key>
+		<dict>
+			<key>hash2</key>
+			<data>
+			xoO/vMfgh/XTelTvYo8QOHxFGoPdxFmxUUA6FkrEbJA=
 			</data>
 		</dict>
 	</dict>

@@ -422,6 +422,7 @@ SWIFT_CLASS("_TtC8Snipsnap19AnnotationTextField")
 SWIFT_CLASS("_TtC8Snipsnap30AnnotationTitlebarTitleControl")
 @interface AnnotationTitlebarTitleControl : NSButton
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER;
+- (BOOL)sendAction:(SEL _Nullable)action to:(id _Nullable)target SWIFT_WARN_UNUSED_RESULT;
 - (void)resetCursorRects;
 - (nonnull instancetype)initWithFrame:(NSRect)frameRect SWIFT_UNAVAILABLE;
 @end
@@ -479,7 +480,6 @@ SWIFT_CLASS("_TtC8Snipsnap20CaptureLibraryWindow")
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 - (void)windowWillClose:(NSNotification * _Nonnull)notification;
-- (void)layoutIfNeeded;
 - (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
 @end
 
@@ -601,6 +601,7 @@ SWIFT_CLASS("_TtC8Snipsnap21VideoAnnotationWindow")
 SWIFT_CLASS("_TtC8Snipsnap17VideoTimelineView")
 @interface VideoTimelineView : NSView
 @property (nonatomic, readonly) BOOL acceptsFirstResponder;
+- (void)resetCursorRects;
 - (void)drawRect:(NSRect)dirtyRect;
 - (void)mouseDown:(NSEvent * _Nonnull)event;
 - (void)mouseDragged:(NSEvent * _Nonnull)event;

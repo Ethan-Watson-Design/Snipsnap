@@ -1,0 +1,192 @@
+{
+  "source": "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/KitchenSinkView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Kitchen Sink",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 50
+        }
+      },
+      {
+        "comment": "",
+        "key": "Design tokens and reusable UI building blocks.",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 53
+        }
+      },
+      {
+        "comment": "",
+        "key": "Palette scales · 100 → 1000",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annotation palette (solid 600)",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 86
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recording gradients",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 100
+        }
+      },
+      {
+        "comment": "",
+        "key": "Snap Area",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 170
+        }
+      },
+      {
+        "comment": "",
+        "key": "Action bar",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 231
+        }
+      },
+      {
+        "comment": "",
+        "key": "Toolbar pill (screenshot tools)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 236
+        }
+      },
+      {
+        "comment": "",
+        "key": "Demo toggle",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 254
+        }
+      },
+      {
+        "comment": "",
+        "key": "Capture mode",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 257
+        }
+      },
+      {
+        "comment": "",
+        "key": "Region",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 258
+        }
+      },
+      {
+        "comment": "",
+        "key": "Window",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 259
+        }
+      },
+      {
+        "comment": "",
+        "key": "Display",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 260
+        }
+      },
+      {
+        "comment": "",
+        "key": "Secondary",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 266
+        }
+      },
+      {
+        "comment": "",
+        "key": "Prominent",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 268
+        }
+      },
+      {
+        "comment": "",
+        "key": "Compact",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 270
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show message toast",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 284
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show action toast",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 289
+        }
+      },
+      {
+        "comment": "",
+        "key": "600",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 337
+        }
+      },
+      {
+        "comment": "",
+        "key": "The quick brown fox",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 378
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 373
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %lld",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 399
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld pt",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 414
+        }
+      }
+    ]
+  },
+  "version": 1
+}

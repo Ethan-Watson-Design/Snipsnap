@@ -7,7 +7,7 @@
         "key": "New Project",
         "location": {
           "startingColumn": 16,
-          "startingLine": 297
+          "startingLine": 310
         }
       },
       {
@@ -15,7 +15,23 @@
         "key": "Custom Flow",
         "location": {
           "startingColumn": 16,
-          "startingLine": 310
+          "startingLine": 323
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add Component",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 338
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit Component",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 353
         }
       },
       {
@@ -23,7 +39,7 @@
         "key": "Choose a screenshot or recording from the sidebar.",
         "location": {
           "startingColumn": 35,
-          "startingLine": 530
+          "startingLine": 594
         }
       },
       {
@@ -31,36 +47,36 @@
         "key": "Select a Capture",
         "location": {
           "startingColumn": 17,
-          "startingLine": 528
+          "startingLine": 592
+        }
+      },
+      {
+        "comment": "",
+        "key": "Snipsnap",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 269
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Rename",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 278
+        }
+      },
+      {
+        "comment": "",
+        "key": "Organize",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 288
         }
       },
       {
         "comment": "",
         "key": "Project name",
-        "location": {
-          "startingColumn": 23,
-          "startingLine": 298
-        }
-      },
-      {
-        "comment": "",
-        "key": "Cancel",
-        "location": {
-          "startingColumn": 20,
-          "startingLine": 299
-        }
-      },
-      {
-        "comment": "",
-        "key": "Create",
-        "location": {
-          "startingColumn": 20,
-          "startingLine": 302
-        }
-      },
-      {
-        "comment": "",
-        "key": "Flow name",
         "location": {
           "startingColumn": 23,
           "startingLine": 311
@@ -84,10 +100,82 @@
       },
       {
         "comment": "",
+        "key": "Flow name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 324
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 325
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 328
+        }
+      },
+      {
+        "comment": "",
+        "key": "UI component (e.g. Button, Modal)",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 339
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 340
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 343
+        }
+      },
+      {
+        "comment": "",
+        "key": "UI component",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 354
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 355
+        }
+      },
+      {
+        "comment": "",
+        "key": "Save",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 358
+        }
+      },
+      {
+        "comment": "",
         "key": "Screenshots and recordings will appear here.",
         "location": {
           "startingColumn": 39,
-          "startingLine": 358
+          "startingLine": 401
         }
       },
       {
@@ -95,7 +183,7 @@
         "key": "No Captures Yet",
         "location": {
           "startingColumn": 21,
-          "startingLine": 356
+          "startingLine": 399
         }
       },
       {
@@ -103,31 +191,15 @@
         "key": "Group captures in the sidebar",
         "location": {
           "startingColumn": 15,
-          "startingLine": 424
+          "startingLine": 470
         }
       },
       {
         "comment": "",
-        "key": "Auto-Rename",
-        "location": {
-          "startingColumn": 27,
-          "startingLine": 380
-        }
-      },
-      {
-        "comment": "",
-        "key": "Organize",
-        "location": {
-          "startingColumn": 27,
-          "startingLine": 388
-        }
-      },
-      {
-        "comment": "",
-        "key": "Group",
+        "key": "Group by",
         "location": {
           "startingColumn": 22,
-          "startingLine": 410
+          "startingLine": 449
         }
       },
       {
@@ -135,7 +207,7 @@
         "key": "Move to Trash",
         "location": {
           "startingColumn": 20,
-          "startingLine": 569
+          "startingLine": 645
         }
       },
       {
@@ -143,7 +215,7 @@
         "key": "Auto-Rename",
         "location": {
           "startingColumn": 23,
-          "startingLine": 556
+          "startingLine": 632
         }
       },
       {
@@ -151,7 +223,7 @@
         "key": "Show in Finder",
         "location": {
           "startingColumn": 23,
-          "startingLine": 561
+          "startingLine": 637
         }
       },
       {
@@ -159,7 +231,7 @@
         "key": "Rename",
         "location": {
           "startingColumn": 23,
-          "startingLine": 566
+          "startingLine": 642
         }
       },
       {
@@ -167,7 +239,7 @@
         "key": "Name",
         "location": {
           "startingColumn": 23,
-          "startingLine": 850
+          "startingLine": 1017
         }
       },
       {
@@ -175,7 +247,7 @@
         "key": "Organized",
         "location": {
           "startingColumn": 22,
-          "startingLine": 889
+          "startingLine": 1055
         }
       },
       {
@@ -183,15 +255,39 @@
         "key": "Revert rename and move",
         "location": {
           "startingColumn": 23,
-          "startingLine": 898
+          "startingLine": 1065
+        }
+      },
+      {
+        "comment": "",
+        "key": "Project folder — Confirm moves the file here",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 1164
         }
       },
       {
         "comment": "",
         "key": "Change %@",
         "location": {
-          "startingColumn": 15,
-          "startingLine": 974
+          "startingColumn": 19,
+          "startingLine": 1165
+        }
+      },
+      {
+        "comment": "",
+        "key": "Don’t move to a project folder",
+        "location": {
+          "startingColumn": 42,
+          "startingLine": 1146
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove %@",
+        "location": {
+          "startingColumn": 79,
+          "startingLine": 1146
         }
       },
       {
@@ -199,7 +295,47 @@
         "key": "Custom…",
         "location": {
           "startingColumn": 24,
-          "startingLine": 943
+          "startingLine": 1119
+        }
+      },
+      {
+        "comment": "",
+        "key": "Change UI component",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 1236
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove component",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 1221
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom…",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 1195
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add UI component tag",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 1262
+        }
+      },
+      {
+        "comment": "",
+        "key": "Component",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1249
         }
       },
       {
@@ -207,7 +343,7 @@
         "key": "%lld selected",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1023
+          "startingLine": 1317
         }
       },
       {
@@ -215,7 +351,7 @@
         "key": "Auto-Tag",
         "location": {
           "startingColumn": 27,
-          "startingLine": 1017
+          "startingLine": 1310
         }
       },
       {
@@ -223,7 +359,7 @@
         "key": "Revert rename and move",
         "location": {
           "startingColumn": 19,
-          "startingLine": 1178
+          "startingLine": 1504
         }
       },
       {
@@ -231,7 +367,7 @@
         "key": "Accept suggestion",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1157
+          "startingLine": 1481
         }
       },
       {
@@ -239,7 +375,7 @@
         "key": "Dismiss suggestion",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1167
+          "startingLine": 1492
         }
       },
       {
@@ -247,7 +383,7 @@
         "key": "Auto-Tag",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1235
+          "startingLine": 1576
         }
       },
       {
@@ -255,7 +391,7 @@
         "key": "Annotate",
         "location": {
           "startingColumn": 28,
-          "startingLine": 1268
+          "startingLine": 1607
         }
       },
       {
@@ -263,7 +399,7 @@
         "key": "No tags suggested",
         "location": {
           "startingColumn": 30,
-          "startingLine": 1346
+          "startingLine": 1701
         }
       },
       {
@@ -271,7 +407,7 @@
         "key": "Rename",
         "location": {
           "startingColumn": 34,
-          "startingLine": 1308
+          "startingLine": 1648
         }
       },
       {
@@ -279,7 +415,7 @@
         "key": "Confirm",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1355
+          "startingLine": 1710
         }
       },
       {
@@ -287,7 +423,7 @@
         "key": "Reject",
         "location": {
           "startingColumn": 35,
-          "startingLine": 1363
+          "startingLine": 1717
         }
       }
     ]

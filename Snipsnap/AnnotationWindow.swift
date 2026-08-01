@@ -187,7 +187,7 @@ struct AnnotationExportSnapshot {
 
 extension NSColor {
     /// Selection outline for annotations in select mode (solid blue, Figma-style handles).
-    static var annotationSelectionAccent: NSColor { DesignTokens.Color.secondary.ns }
+    static var annotationSelectionAccent: NSColor { DesignTokens.Color.primary.ns }
     /// Region capture overlay border and handles.
     static var regionSelectionAccent: NSColor { DesignTokens.Color.regionSelectionAccent.ns }
 
@@ -4523,7 +4523,7 @@ private final class SpotlightInlineField: NSView, NSTextFieldDelegate {
     private func updateChrome() {
         if isEditing {
             layer?.borderWidth = 1.5
-            layer?.borderColor = DesignTokens.Color.secondary.ns.cgColor
+            layer?.borderColor = DesignTokens.Color.primary.ns.cgColor
         } else if isHovered {
             layer?.borderWidth = 1
             layer?.borderColor = NSColor.black.withAlphaComponent(0.18).cgColor
@@ -5856,7 +5856,7 @@ final class ToolbarPillView: NSView {
 
     private func refresh() {
         let cfg = NSImage.SymbolConfiguration(pointSize: toolIconPointSize, weight: .medium)
-        let inactiveTint = DesignTokens.Color.primary.ns
+        let inactiveTint = DesignTokens.Color.textPrimary.ns
         let activeTint = NSColor.white
         let activeFill = DesignTokens.Color.primary.cg
         for (tool, btn) in toolButtons {
@@ -7451,7 +7451,7 @@ private extension NSColor {
 
     var annotationTitlebarForeground: NSColor {
         isLightAnnotationBackground
-            ? DesignTokens.Color.primary.ns
+            ? DesignTokens.Color.textPrimary.ns
             : DesignTokens.Color.textOnPrimary.ns
     }
 }

@@ -41,6 +41,11 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             current?.reloadContent()
             current?.center()
             current?.makeKeyAndOrderFront(nil)
+            current?.applyTitlebarFill()
+            // Toolbar / titlebar materials finish installing after the first layout pass.
+            DispatchQueue.main.async {
+                current?.applyTitlebarFill()
+            }
             NSApp.activate(ignoringOtherApps: true)
         }
     }
@@ -53,6 +58,14 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             defer: false
         )
         title = "Snipsnap"
+        titleVisibility = .hidden
+        toolbarStyle = .unifiedCompact
+        // Let window.backgroundColor show through the titlebar + toolbar chrome
+        // (SwiftUI .toolbarBackground does not reliably tint AppKit-hosted toolbars).
+        styleMask.insert(.fullSizeContentView)
+        titlebarAppearsTransparent = true
+        titlebarSeparatorStyle = .none
+        backgroundColor = DesignTokens.Color.background.ns
         minSize = NSSize(width: 640, height: 420)
         isReleasedWhenClosed = false
         delegate = self
@@ -78,7 +91,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
 
     func reloadContent() {
         let view = CaptureLibraryView(
-            entries: CaptureHistory.shared.entries,
+            entries: CaptureHistory.shared.entriesInSaveRoot,
             sessionState: sessionState,
             onOpen: { entry in
                 CaptureLibraryWindow.open(entry)
@@ -87,18 +100,70 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         if let hostingView {
             // Update in place so List scroll position and @State selection survive.
             hostingView.rootView = view
-            if contentView !== hostingView {
-                contentView = hostingView
-            }
+            layoutLibraryContent(hostingView)
+            applyTitlebarFill()
             return
         }
         let hostingView = NSHostingView(rootView: view)
         // Avoid List intrinsic height driving window/sidebar sizing.
         hostingView.sizingOptions = []
-        hostingView.translatesAutoresizingMaskIntoConstraints = true
-        hostingView.autoresizingMask = [.width, .height]
         self.hostingView = hostingView
-        contentView = hostingView
+        layoutLibraryContent(hostingView)
+        applyTitlebarFill()
+    }
+
+    private func layoutLibraryContent(_ hostingView: NSView) {
+        if let container = contentView as? CaptureLibraryContentContainer {
+            container.setHostingView(hostingView)
+            return
+        }
+
+        let container = CaptureLibraryContentContainer()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = DesignTokens.Color.background.ns.cgColor
+        container.setHostingView(hostingView)
+        contentView = container
+    }
+
+    override func layoutIfNeeded() {
+        super.layoutIfNeeded()
+        (contentView as? CaptureLibraryContentContainer)?.layoutHostingView(in: self)
+        applyTitlebarFill()
+    }
+
+    /// Solid fill behind traffic lights / title / toolbar items; kill vibrancy that stays white.
+    fileprivate func applyTitlebarFill() {
+        let fill = DesignTokens.Color.background.ns
+        backgroundColor = fill
+        toolbar?.showsBaselineSeparator = false
+        contentView?.wantsLayer = true
+        contentView?.layer?.backgroundColor = fill.cgColor
+
+        guard let closeButton = standardWindowButton(.closeButton),
+              let titlebar = closeButton.superview else { return }
+
+        // Titlebar view + container + any toolbar chrome often use NSVisualEffectView
+        // materials that stay system-white unless removed.
+        var roots: [NSView] = [titlebar]
+        if let container = titlebar.superview {
+            roots.append(container)
+        }
+        for root in roots {
+            hideVisualEffects(in: root, depth: 0)
+            root.wantsLayer = true
+            root.layer?.backgroundColor = fill.cgColor
+        }
+    }
+
+    private func hideVisualEffects(in view: NSView, depth: Int) {
+        guard depth < 5 else { return }
+        if let effect = view as? NSVisualEffectView {
+            effect.isHidden = true
+            effect.alphaValue = 0
+        }
+        for subview in view.subviews {
+            hideVisualEffects(in: subview, depth: depth + 1)
+        }
     }
 
     static func open(_ entry: CaptureEntry) {
@@ -115,6 +180,39 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         DispatchQueue.main.async {
             AppDockPresentation.hideFromDockIfNeeded()
         }
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        applyTitlebarFill()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        applyTitlebarFill()
+    }
+}
+
+/// Hosts SwiftUI below the titlebar/toolbar when using `fullSizeContentView`.
+private final class CaptureLibraryContentContainer: NSView {
+    private var hostingView: NSView?
+
+    func setHostingView(_ view: NSView) {
+        hostingView?.removeFromSuperview()
+        hostingView = view
+        addSubview(view)
+        needsLayout = true
+    }
+
+    func layoutHostingView(in window: NSWindow) {
+        guard let hostingView else { return }
+        let safeRect = convert(window.contentLayoutRect, from: nil)
+        hostingView.frame = safeRect
+        hostingView.autoresizingMask = [.width, .height]
+    }
+
+    override func layout() {
+        super.layout()
+        guard let window else { return }
+        layoutHostingView(in: window)
     }
 }
 
@@ -215,6 +313,9 @@ private struct CaptureLibraryView: View {
     @State private var replaceComponentDraft = ""
     /// Groups start collapsed; membership means the section is expanded.
     @State private var expandedGroupIDs = Set<String>()
+    /// Manual double-click detection so rename does not use TapGesture(count: 2),
+    /// which can swallow the first click and leave List selection unchanged.
+    @State private var lastRowClick: (id: UUID, date: Date)?
 
     @State private var showOrganizeSheet = false
     @State private var organizePlan = OrganizePlan(matchedItems: [], unmatchedItems: [])
@@ -249,13 +350,48 @@ private struct CaptureLibraryView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             sidebarColumn
-        } detail: {
+            Rectangle()
+                .fill(DesignTokens.Color.border.swiftUI.opacity(0.55))
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
             detailColumn
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(DesignTokens.Color.background.swiftUI)
         }
         .background(DesignTokens.Color.background.swiftUI)
+        // Prefer a solid toolbar fill; AppKit also strips titlebar vibrancy in applyTitlebarFill().
+        .toolbarBackground(DesignTokens.Color.background.swiftUI, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Snipsnap")
+                    .font(.snipsnap(.windowTitle))
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+            }
+            .sharedBackgroundVisibility(.hidden)
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    requestSuggestions(for: selection)
+                } label: {
+                    Label("Auto-Rename", systemImage: "sparkles")
+                        .font(.snipsnap(.body))
+                }
+                .controlSize(.small)
+                .disabled(selection.isEmpty)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    presentOrganizeSheet()
+                } label: {
+                    Label("Organize", systemImage: "folder.badge.gearshape")
+                        .font(.snipsnap(.body))
+                }
+                .controlSize(.small)
+                .disabled(entries.isEmpty)
+            }
+        }
         .sheet(isPresented: $showOrganizeSheet) {
             OrganizePreviewSheet(
                 plan: $organizePlan,
@@ -365,14 +501,11 @@ private struct CaptureLibraryView: View {
                     description: Text("Screenshots and recordings will appear here.")
                 )
             } else {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                     groupByPicker
                         .padding(.horizontal, DesignTokens.Spacing.md)
                         .padding(.top, DesignTokens.Spacing.sm)
-                        .padding(.bottom, DesignTokens.Spacing.xs)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .background(DesignTokens.Color.background.swiftUI)
+                        .fixedSize(horizontal: true, vertical: true)
 
                     GeometryReader { geo in
                         captureList
@@ -384,29 +517,9 @@ private struct CaptureLibraryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(width: 300)
+        .frame(maxHeight: .infinity, alignment: .top)
         .background(DesignTokens.Color.background.swiftUI)
-        .navigationSplitViewColumnWidth(min: 220, ideal: 300, max: 380)
-        .toolbarBackground(DesignTokens.Color.background.swiftUI, for: .windowToolbar)
-        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    requestSuggestions(for: selection)
-                } label: {
-                    Label("Auto-Rename", systemImage: "sparkles")
-                }
-                .disabled(selection.isEmpty)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    presentOrganizeSheet()
-                } label: {
-                    Label("Organize", systemImage: "folder.badge.gearshape")
-                }
-                .disabled(entries.isEmpty)
-            }
-        }
     }
 
     private var groupByPicker: some View {
@@ -423,21 +536,32 @@ private struct CaptureLibraryView: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Text("Group")
-                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-                Text(groupBy.menuLabel)
+            HStack(spacing: 6) {
+                Text("Group by")
                     .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                Text(groupBy.menuLabel)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .semibold))
                     .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
             }
-            .font(.snipsnap(.caption))
-            .contentShape(Rectangle())
+            .font(.custom(DesignTokens.Typography.postScriptName(for: .medium), size: 14))
+            .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                .stroke(DesignTokens.Color.border.swiftUI, lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+        .pointerStyle(.link)
         .help("Group captures in the sidebar")
     }
 
@@ -452,14 +576,14 @@ private struct CaptureLibraryView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(
                             top: DesignTokens.Spacing.xs,
-                            leading: DesignTokens.Spacing.sm,
+                            leading: 0,
                             bottom: DesignTokens.Spacing.xs,
-                            trailing: DesignTokens.Spacing.sm
+                            trailing: 0
                         ))
 
                     if expandedGroupIDs.contains(group.id) {
                         ForEach(group.entries) { entry in
-                            captureListRow(for: entry)
+                            captureListRow(for: entry, nested: true)
                         }
                     }
                 }
@@ -499,6 +623,7 @@ private struct CaptureLibraryView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
     }
 
     private func toggleGroupExpanded(_ id: String) {
@@ -567,25 +692,41 @@ private struct CaptureLibraryView: View {
     }
 
     @ViewBuilder
-    private func captureListRow(for entry: CaptureEntry) -> some View {
-        CaptureSidebarRow(
+    private func captureListRow(for entry: CaptureEntry, nested: Bool = false) -> some View {
+        let isRenaming = renameTarget?.id == entry.id
+        let row = CaptureSidebarRow(
             entry: entry,
             rowState: sessionState.rowStates[entry.id] ?? CaptureRowSuggestionState(),
-            isRenaming: renameTarget?.id == entry.id,
+            isRenaming: isRenaming,
             renameDraft: $renameDraft,
-            onBeginRename: { beginRename(entry) },
             onCommitRename: commitRename,
             onCancelRename: cancelRename,
             onRevertSuggestion: { revertSuggestion(for: entry) }
         )
+
+        // Keep the TextField out of a Button while renaming — otherwise macOS
+        // shows an empty edit chrome until a second click focuses the field.
+        Group {
+            if isRenaming {
+                row
+            } else {
+                Button {
+                    handleCaptureRowClick(entry)
+                } label: {
+                    row
+                }
+                .buttonStyle(.plain)
+                .pointerStyle(.link)
+            }
+        }
         .tag(entry.id)
         .listRowBackground(listRowBackground(isSelected: selection.contains(entry.id)))
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(
             top: DesignTokens.Spacing.xs,
-            leading: 0,
+            leading: nested ? DesignTokens.Spacing.lg : DesignTokens.Spacing.sm,
             bottom: DesignTokens.Spacing.xs,
-            trailing: DesignTokens.Spacing.sm
+            trailing: nested ? DesignTokens.Spacing.md : DesignTokens.Spacing.sm
         ))
         // Custom light selection fill — keep labels dark instead of List's white-on-accent tint.
         .environment(\.backgroundProminence, .standard)
@@ -610,6 +751,28 @@ private struct CaptureLibraryView: View {
             Button("Move to Trash", role: .destructive) {
                 moveToTrash(entry)
             }
+        }
+    }
+
+    private func handleCaptureRowClick(_ entry: CaptureEntry) {
+        let now = Date()
+        if let last = lastRowClick,
+           last.id == entry.id,
+           now.timeIntervalSince(last.date) <= NSEvent.doubleClickInterval {
+            lastRowClick = nil
+            beginRename(entry)
+            return
+        }
+        lastRowClick = (id: entry.id, date: now)
+
+        if NSEvent.modifierFlags.contains(.command) {
+            if selection.contains(entry.id) {
+                selection.remove(entry.id)
+            } else {
+                selection.insert(entry.id)
+            }
+        } else {
+            selection = [entry.id]
         }
     }
 
@@ -758,8 +921,10 @@ private struct CaptureLibraryView: View {
 
     private func beginRename(_ entry: CaptureEntry) {
         selection = [entry.id]
-        renameTarget = entry
+        // Seed the draft before flipping into edit mode so the field never
+        // mounts against an empty string.
         renameDraft = entry.displayName
+        renameTarget = entry
     }
 
     private func commitRename() {
@@ -927,26 +1092,114 @@ private struct CaptureLibraryView: View {
     }
 }
 
+/// AppKit-backed rename field so the current name is visible immediately and
+/// the field becomes first responder without an extra click.
+private struct InlineRenameTextField: NSViewRepresentable {
+    @Binding var text: String
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = RenameNSTextField(string: text)
+        field.isBordered = false
+        field.isBezeled = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = NSFont.snipsnap(.caption)
+        field.textColor = DesignTokens.Color.textPrimary.ns
+        field.placeholderString = "Name"
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.submit(_:))
+        field.onEscape = { [weak coordinator = context.coordinator] in
+            coordinator?.cancel()
+        }
+
+        DispatchQueue.main.async {
+            guard let window = field.window else { return }
+            window.makeFirstResponder(field)
+            field.currentEditor()?.selectAll(nil)
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.onSubmit = onSubmit
+        context.coordinator.onCancel = onCancel
+        if nsView.stringValue != text, nsView.currentEditor() == nil {
+            nsView.stringValue = text
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var text: Binding<String>
+        var onSubmit: () -> Void
+        var onCancel: () -> Void
+        private var didFinish = false
+
+        init(text: Binding<String>, onSubmit: @escaping () -> Void, onCancel: @escaping () -> Void) {
+            self.text = text
+            self.onSubmit = onSubmit
+            self.onCancel = onCancel
+        }
+
+        @objc func submit(_ sender: NSTextField) {
+            finish(commit: true)
+        }
+
+        func cancel() {
+            finish(commit: false)
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            finish(commit: true)
+        }
+
+        private func finish(commit: Bool) {
+            guard !didFinish else { return }
+            didFinish = true
+            if commit {
+                onSubmit()
+            } else {
+                onCancel()
+            }
+        }
+    }
+}
+
+private final class RenameNSTextField: NSTextField {
+    var onEscape: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
 private struct CaptureSidebarRow: View {
     let entry: CaptureEntry
     let rowState: CaptureRowSuggestionState
     let isRenaming: Bool
     @Binding var renameDraft: String
-    let onBeginRename: () -> Void
     let onCommitRename: () -> Void
     let onCancelRename: () -> Void
     let onRevertSuggestion: () -> Void
 
-    @FocusState private var renameFieldFocused: Bool
-
     var body: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
-            Image(nsImage: entry.thumbnail)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 44, height: 32)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
-
             filenameLabel
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -954,49 +1207,35 @@ private struct CaptureSidebarRow: View {
                 .layoutPriority(1)
         }
         .contentShape(Rectangle())
-        .onChange(of: isRenaming) { _, renaming in
-            if renaming {
-                renameFieldFocused = true
-            }
-        }
     }
 
     @ViewBuilder
     private var filenameLabel: some View {
         if isRenaming {
-            TextField("Name", text: $renameDraft)
-                .textFieldStyle(.plain)
-                .font(.snipsnap(.body))
-                .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(
-                    RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                                .stroke(DesignTokens.Color.primary.swiftUI, lineWidth: 1.5)
-                        )
-                )
-                .focused($renameFieldFocused)
-                .onSubmit(onCommitRename)
-                .onExitCommand(perform: onCancelRename)
-                .onAppear { renameFieldFocused = true }
-                .onChange(of: renameFieldFocused) { _, focused in
-                    if !focused, isRenaming {
-                        onCommitRename()
-                    }
-                }
+            InlineRenameTextField(
+                text: $renameDraft,
+                onSubmit: onCommitRename,
+                onCancel: onCancelRename
+            )
+            .font(.snipsnap(.caption))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                    .fill(Color(nsColor: .textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                            .stroke(DesignTokens.Color.primary.swiftUI, lineWidth: 1.5)
+                    )
+            )
         } else {
             Text(entry.displayName)
-                .font(.snipsnap(.body))
+                .font(.snipsnap(.caption))
                 .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .simultaneousGesture(
-                    TapGesture(count: 2).onEnded { onBeginRename() }
-                )
         }
     }
 
@@ -1013,6 +1252,7 @@ private struct CaptureSidebarRow: View {
                         .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .help("Revert rename and move")
             }
         } else {
@@ -1083,6 +1323,7 @@ private struct SuggestionTagMenu: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
+            .pointerStyle(.link)
             .fixedSize()
 
             if let onRemove {
@@ -1092,6 +1333,7 @@ private struct SuggestionTagMenu: View {
                         .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .help(kind == .project ? "Don’t move to a project folder" : "Remove \(kind.displayName.lowercased())")
             }
         }
@@ -1157,6 +1399,7 @@ private struct SuggestionComponentChip: View {
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
+            .pointerStyle(.link)
             .fixedSize()
 
             Button(action: onRemove) {
@@ -1165,6 +1408,7 @@ private struct SuggestionComponentChip: View {
                     .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .help("Remove component")
         }
         .font(.snipsnap(.caption))
@@ -1205,6 +1449,7 @@ private struct SuggestionAddComponentButton: View {
             )
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .help("Add UI component tag")
     }
 }
@@ -1422,6 +1667,7 @@ private struct CaptureMultiSelectPane: View {
                         .font(.system(size: 10, weight: .bold))
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(0.55))
                 .help("Accept suggestion")
 
@@ -1432,6 +1678,7 @@ private struct CaptureMultiSelectPane: View {
                         .font(.system(size: 10, weight: .bold))
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(0.55))
                 .help("Dismiss suggestion")
             }
@@ -1444,6 +1691,7 @@ private struct CaptureMultiSelectPane: View {
                     .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .help("Revert rename and move")
         }
     }

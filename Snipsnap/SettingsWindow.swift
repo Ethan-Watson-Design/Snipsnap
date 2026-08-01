@@ -44,7 +44,13 @@ enum AppSettings {
             return FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first!
         }
         set {
-            UserDefaults.standard.set(newValue.path, forKey: destinationFolderKey)
+            let path = newValue.standardizedFileURL.path
+            let previous = UserDefaults.standard.string(forKey: destinationFolderKey)
+            UserDefaults.standard.set(path, forKey: destinationFolderKey)
+            if previous != path {
+                // Library / menu scope to this folder — refresh when it changes.
+                NotificationCenter.default.post(name: .captureHistoryDidChange, object: nil)
+            }
         }
     }
 
@@ -90,10 +96,10 @@ private enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 }
 
 private struct SettingsRootView: View {
-    @State private var selection: SettingsPane? = .general
+    @State private var selection: SettingsPane = .general
 
     var body: some View {
-        NavigationSplitView {
+        HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
                 ForEach(SettingsPane.allCases) { pane in
                     Button {
@@ -115,18 +121,17 @@ private struct SettingsRootView: View {
                 Spacer(minLength: 0)
             }
             .padding(DesignTokens.Spacing.md)
-            .background(DesignTokens.Color.background.swiftUI)
-            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
-        } detail: {
+            .frame(width: 180, alignment: .topLeading)
+
             Group {
-                switch selection ?? .general {
+                switch selection {
                 case .general:
                     GeneralSettingsView()
                 case .kitchenSink:
                     KitchenSinkView()
                 }
             }
-            .background(DesignTokens.Color.background.swiftUI)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DesignTokens.Color.background.swiftUI)
         .frame(minWidth: 720, minHeight: 480)
@@ -153,7 +158,6 @@ private struct GeneralSettingsView: View {
             .padding(DesignTokens.Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(DesignTokens.Color.background.swiftUI)
     }
 
     private var saveLocationSection: some View {

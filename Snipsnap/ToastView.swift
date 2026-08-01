@@ -281,7 +281,7 @@ final class ToastWindow: NSPanel {
         actionButton.bezelStyle = .inline
         actionButton.font = NSFont.snipsnap(.body)
         actionButton.alignment = .center
-        actionButton.contentTintColor = DesignTokens.Color.accent.ns
+        actionButton.contentTintColor = DesignTokens.Color.primary.ns
         actionButton.setButtonType(.momentaryChange)
         actionButton.action = #selector(ToastActionTrampoline.handleTap)
         let trampoline = ToastActionTrampoline { [weak self] in

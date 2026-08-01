@@ -225,8 +225,13 @@ final class CaptureHistory {
 
     private(set) var entries: [CaptureEntry] = []
 
-    var recents: [CaptureItem] { entries.map(\.item) }
-    var menuEntries: [CaptureEntry] { Array(entries.prefix(Self.maxMenuItems)) }
+    /// Captures whose files live under the current Settings save folder (including project subfolders).
+    var entriesInSaveRoot: [CaptureEntry] {
+        entries.filter { isUnderSaveRoot(id: $0.id) }
+    }
+
+    var recents: [CaptureItem] { entriesInSaveRoot.map(\.item) }
+    var menuEntries: [CaptureEntry] { Array(entriesInSaveRoot.prefix(Self.maxMenuItems)) }
 
     private init() {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -312,7 +317,7 @@ final class CaptureHistory {
     }
 
     func previousScreenshot(excluding id: UUID?) -> (entry: CaptureEntry, image: NSImage)? {
-        for entry in entries {
+        for entry in entriesInSaveRoot {
             guard entry.id != id else { continue }
             guard case .screenshot = entry.item else { continue }
             guard let image = fullImage(for: entry.id) else { continue }
@@ -323,7 +328,7 @@ final class CaptureHistory {
 
     func screenshotChoices(excluding id: UUID?, limit: Int = 8) -> [(entry: CaptureEntry, image: NSImage)] {
         var results: [(CaptureEntry, NSImage)] = []
-        for entry in entries {
+        for entry in entriesInSaveRoot {
             guard entry.id != id else { continue }
             guard case .screenshot = entry.item else { continue }
             guard let image = fullImage(for: entry.id) else { continue }
@@ -347,6 +352,20 @@ final class CaptureHistory {
     func isAtRootCapture(id: UUID) -> Bool {
         guard let parent = parentDirectoryURL(for: id) else { return false }
         return parent.standardizedFileURL == AppSettings.destinationFolderURL.standardizedFileURL
+    }
+
+    /// True when the capture file is inside the Settings save folder (root or a nested project folder).
+    func isUnderSaveRoot(id: UUID) -> Bool {
+        guard let fileURL = fileURL(for: id) else { return false }
+        return Self.isURL(fileURL, under: AppSettings.destinationFolderURL)
+    }
+
+    static func isURL(_ url: URL, under root: URL) -> Bool {
+        let filePath = url.standardizedFileURL.path
+        let rootPath = root.standardizedFileURL.path
+        if filePath == rootPath { return true }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        return filePath.hasPrefix(prefix)
     }
 
     @discardableResult

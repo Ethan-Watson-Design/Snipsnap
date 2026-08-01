@@ -74,10 +74,10 @@ enum CaptureLibraryOrganizer {
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    /// Distinct tag names of the given kind across the capture library.
+    /// Distinct tag names of the given kind across captures in the Settings save folder.
     static func existingTagNames(kind: CaptureTagKind) -> [String] {
         var names = Set<String>()
-        for entry in CaptureHistory.shared.entries {
+        for entry in CaptureHistory.shared.entriesInSaveRoot {
             for tag in entry.tags where tag.kind == kind {
                 let name = tag.name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else { continue }

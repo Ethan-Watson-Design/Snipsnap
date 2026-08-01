@@ -70,6 +70,7 @@ struct CaptureTagBar: View {
                     .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .help(
                 tag.kind == .project
                     ? "Remove project and move file back to save folder"
@@ -104,6 +105,7 @@ struct CaptureTagBar: View {
                 )
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .help("Add tag")
     }
 
@@ -143,6 +145,7 @@ struct CaptureTagBar: View {
                     .font(.system(size: 9, weight: .bold))
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
         }
         .padding(.horizontal, DesignTokens.Spacing.sm)

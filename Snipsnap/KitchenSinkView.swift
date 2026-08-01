@@ -41,7 +41,6 @@ struct KitchenSinkView: View {
             .padding(DesignTokens.Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .background(DesignTokens.Color.background.swiftUI)
     }
 
     // MARK: - Header
@@ -69,13 +68,22 @@ struct KitchenSinkView: View {
                 colorSwatch("Primary", DesignTokens.Color.primary.swiftUI)
                 colorSwatch("On Primary", DesignTokens.Color.textOnPrimary.swiftUI)
                 colorSwatch("Panel", DesignTokens.Color.panelSurface.swiftUI)
-                colorSwatch("Accent", DesignTokens.Color.accent.swiftUI)
-                colorSwatch("Secondary", DesignTokens.Color.secondary.swiftUI)
                 colorSwatch("Selection", DesignTokens.Color.listSelectionFill.swiftUI)
                 colorSwatch("Region", DesignTokens.Color.regionSelectionAccent.swiftUI)
             }
 
-            Text("Annotation palette")
+            Text("Palette scales · 100 → 1000")
+                .font(.snipsnap(.label))
+                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                .padding(.top, DesignTokens.Spacing.sm)
+
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
+                ForEach(Array(DesignTokens.Palette.all.enumerated()), id: \.offset) { _, scale in
+                    paletteScaleRow(scale)
+                }
+            }
+
+            Text("Annotation palette (solid 600)")
                 .font(.snipsnap(.label))
                 .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
                 .padding(.top, DesignTokens.Spacing.sm)
@@ -312,6 +320,38 @@ struct KitchenSinkView: View {
         }
     }
 
+    private func paletteScaleRow(_ scale: TokenColorScale) -> some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Text(scale.name)
+                .font(.snipsnap(.caption))
+                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                .frame(width: 72, alignment: .leading)
+            HStack(spacing: 2) {
+                ForEach(ColorTint.allCases, id: \.self) { tint in
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(scale[tint].swiftUI)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 28)
+                        .overlay(alignment: .bottom) {
+                            if tint == .t600 {
+                                Text("600")
+                                    .font(DesignTokens.Typography.monoSwiftUI(size: 8))
+                                    .foregroundStyle(tint.rawValue >= 600
+                                        ? Color.white.opacity(0.9)
+                                        : DesignTokens.Color.textPrimary.swiftUI.opacity(0.7))
+                                    .padding(.bottom, 2)
+                            }
+                        }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                    .stroke(DesignTokens.Color.border.swiftUI, lineWidth: 0.5)
+            )
+        }
+    }
+
     private func gradientChip(_ name: String, _ colors: [Color]) -> some View {
         VStack(spacing: DesignTokens.Spacing.xs) {
             RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
@@ -325,7 +365,7 @@ struct KitchenSinkView: View {
 
     private func typeRow(_ name: String, _ style: DesignTokens.Typography.Style) -> some View {
         let token = style.token
-        return HStack(alignment: .firstTextBaseline) {
+        return HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
                     .font(.snipsnap(.caption))
@@ -369,7 +409,7 @@ struct KitchenSinkView: View {
                 .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
                 .frame(width: 36, alignment: .leading)
             RoundedRectangle(cornerRadius: 1)
-                .fill(DesignTokens.Color.secondary.swiftUI)
+                .fill(DesignTokens.Color.primary.swiftUI)
                 .frame(width: value, height: 12)
             Text("\(Int(value)) pt")
                 .font(.snipsnap(.caption))

@@ -3,10 +3,11 @@
 //  Snipsnap
 //
 //  Single source of truth for color, spacing, radius, type, and elevation.
+//  Colors: `Palette` holds 10-tint scales (100–1000); `Color` maps semantics.
 //  Floating panels (Capture Bar, toast, annotation chrome) lean Figma: small
-//  radii, soft directional shadows, a single accent used sparingly.
+//  radii, soft directional shadows, primary blue used sparingly.
 //  Content surfaces (Settings, Capture Library) lean Notion: neutral grays,
-//  generous whitespace, restrained type, accent only on the primary action.
+//  generous whitespace, restrained type, primary only on the main action.
 //
 
 import AppKit
@@ -22,6 +23,75 @@ struct TokenColor {
 
     var swiftUI: Color { Color(nsColor: ns) }
     var cg: CGColor { ns.cgColor }
+
+    /// Calibrated sRGB from a 24-bit hex (e.g. `0xE8328C`).
+    init(hex: UInt32, alpha: CGFloat = 1) {
+        let r = CGFloat((hex >> 16) & 0xFF) / 255
+        let g = CGFloat((hex >> 8) & 0xFF) / 255
+        let b = CGFloat(hex & 0xFF) / 255
+        self.init(ns: NSColor(calibratedRed: r, green: g, blue: b, alpha: alpha))
+    }
+
+    init(ns: NSColor) {
+        self.ns = ns
+    }
+}
+
+/// Step on a 10-tint scale (Vercel / Linear style: 100 lightest → 1000 darkest).
+enum ColorTint: Int, CaseIterable, Comparable, Hashable {
+    case t100 = 100
+    case t200 = 200
+    case t300 = 300
+    case t400 = 400
+    case t500 = 500
+    case t600 = 600
+    case t700 = 700
+    case t800 = 800
+    case t900 = 900
+    case t1000 = 1000
+
+    /// Zero-based index into a `TokenColorScale`.
+    var index: Int { (rawValue / 100) - 1 }
+
+    var label: String { "\(rawValue)" }
+
+    static func < (lhs: ColorTint, rhs: ColorTint) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+/// Fixed 10-step tint ramp for one hue family.
+///
+/// Intended roles (same convention as Vercel / Linear):
+/// - **100–200** — tinted backgrounds, subtle fills
+/// - **300–400** — hover / active soft fills, muted borders
+/// - **500** — stronger borders, focus rings
+/// - **600** — solid / brand (`solid`)
+/// - **700–800** — hovered / pressed solids
+/// - **900–1000** — high-contrast text and icons on light surfaces
+struct TokenColorScale {
+    let name: String
+    private let colors: [TokenColor]
+
+    init(name: String, _ hexes: [UInt32]) {
+        precondition(hexes.count == ColorTint.allCases.count, "Color scales require exactly 10 tints")
+        self.name = name
+        self.colors = hexes.map { TokenColor(hex: $0) }
+    }
+
+    subscript(_ tint: ColorTint) -> TokenColor {
+        colors[tint.index]
+    }
+
+    /// Brand / solid stop — always tint 600.
+    var solid: TokenColor { self[.t600] }
+
+    var all: [(tint: ColorTint, color: TokenColor)] {
+        ColorTint.allCases.map { ($0, self[$0]) }
+    }
+
+    var swiftUI: [SwiftUI.Color] { colors.map(\.swiftUI) }
+    var ns: [NSColor] { colors.map(\.ns) }
 }
 
 /// A multi-stop gradient available as `NSColor`, SwiftUI `Color`, and `CIColor`.
@@ -83,7 +153,8 @@ enum DesignTokens {
     enum Color {
         // Semantic — system colors, dark-mode-safe by default.
 
-        static var background: TokenColor { TokenColor(ns: .windowBackgroundColor) }
+        /// Content window fill (View All, Settings). Light `#F4F4F4`, dark near-black.
+        static let background = dynamicNeutralSurface(light: 244.0 / 255.0, dark: 0.12)
         static var surface: TokenColor { TokenColor(ns: .controlColor) }
         static var surfaceElevated: TokenColor { TokenColor(ns: .controlBackgroundColor) }
         static var border: TokenColor { TokenColor(ns: .separatorColor) }
@@ -95,8 +166,8 @@ enum DesignTokens {
         static let panelHoverFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.10))
         static let panelActiveFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.14))
 
-        /// Selected list / chip fill. Light L=93, dark L=22.
-        static let listSelectionFill = dynamicNeutralSurface(light: 0.93, dark: 0.22)
+        /// Selected list / nav / chip fill. Light L=86, dark L=28.
+        static let listSelectionFill = dynamicNeutralSurface(light: 0.86, dark: 0.28)
 
         /// Neutral surface at HSL lightness (achromatic). AppKit HSB brightness matches HSL L when S=0.
         static func neutralSurface(lightness: CGFloat) -> TokenColor {
@@ -122,20 +193,14 @@ enum DesignTokens {
             }))
         }
 
-        /// Active toolbar controls, emphasis strokes. Light L=15, dark L=90.
-        static let primary = dynamicNeutralSurface(light: 0.15, dark: 0.90)
+        /// Brand primary — blue 700. Buttons, focus, interactive emphasis.
+        static let primary = Palette.blue[.t700]
 
         /// Icons and labels on `primary` surfaces.
-        static let textOnPrimary = dynamicAlphaFill(
-            light: NSColor.white.withAlphaComponent(0.85),
-            dark: NSColor.black.withAlphaComponent(0.85)
-        )
+        static let textOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.92))
 
         /// Dividers on `primary` surfaces.
-        static let borderOnPrimary = dynamicAlphaFill(
-            light: NSColor.white.withAlphaComponent(0.12),
-            dark: NSColor.black.withAlphaComponent(0.12)
-        )
+        static let borderOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.18))
 
         /// Floating / elevated panel surface. Light L=97, dark L=18.
         static let panelSurface = dynamicNeutralSurface(light: 0.97, dark: 0.18)
@@ -145,14 +210,6 @@ enum DesignTokens {
             light: NSColor.black.withAlphaComponent(0.12),
             dark: NSColor.white.withAlphaComponent(0.12)
         )
-
-        // Brand
-
-        /// Primary accent — focus rings, highlights (pink).
-        static let accent = TokenColor(ns: NSColor(calibratedRed: 0xE8 / 255, green: 0x32 / 255, blue: 0x8C / 255, alpha: 1))
-
-        /// Secondary accent — selection outlines, interactive emphasis (blue).
-        static let secondary = TokenColor(ns: NSColor(calibratedRed: 0x50 / 255, green: 0x80 / 255, blue: 0xFF / 255, alpha: 1))
 
         /// Region capture overlay border and handles.
         static let regionSelectionAccent = TokenColor(ns: NSColor(calibratedWhite: 0.72, alpha: 0.55))
@@ -182,20 +239,73 @@ enum DesignTokens {
             }
         }
 
-        /// Annotation stroke / fill palette (unchanged values, re-homed).
-        static let annotationPalette: [TokenColor] = [
-            TokenColor(ns: NSColor(calibratedRed: 0xFF / 255, green: 0x4A / 255, blue: 0x45 / 255, alpha: 1)), // Tomato
-            TokenColor(ns: NSColor(calibratedRed: 0xFF / 255, green: 0x8A / 255, blue: 0x38 / 255, alpha: 1)), // Tangerine
-            TokenColor(ns: NSColor(calibratedRed: 0xF0 / 255, green: 0xA8 / 255, blue: 0x00 / 255, alpha: 1)), // Gold
-            TokenColor(ns: NSColor(calibratedRed: 0x2E / 255, green: 0xC8 / 255, blue: 0x7A / 255, alpha: 1)), // Sage
-            TokenColor(ns: NSColor(calibratedRed: 0x00 / 255, green: 0xB4 / 255, blue: 0xD4 / 255, alpha: 1)), // Peacock
-            TokenColor(ns: NSColor(calibratedRed: 0x50 / 255, green: 0x80 / 255, blue: 0xFF / 255, alpha: 1)), // Blueberry
-            TokenColor(ns: NSColor(calibratedRed: 0x9D / 255, green: 0x66 / 255, blue: 0xF0 / 255, alpha: 1)), // Grape
-            TokenColor(ns: NSColor(calibratedRed: 0xF0 / 255, green: 0x4E / 255, blue: 0x88 / 255, alpha: 1)), // Flamingo
-        ]
+        /// Annotation stroke / fill palette — each color’s solid (600) stop.
+        static let annotationPalette: [TokenColor] = Palette.annotation.map(\.solid)
 
         static var annotationPaletteNS: [NSColor] { annotationPalette.map(\.ns) }
         static var annotationPaletteSwiftUI: [SwiftUI.Color] { annotationPalette.map(\.swiftUI) }
+    }
+
+    // MARK: Palette (10-tint scales)
+
+    /// Primitive color ramps — 100 (lightest) → 1000 (darkest).
+    /// Use `Palette.blue[.t200]` for soft fills, `[.t700]` for brand primary, `[.t900]` for text.
+    enum Palette {
+        static let gray = TokenColorScale(name: "Gray", [
+            0xFAFAFA, 0xF5F5F5, 0xEBEBEB, 0xE0E0E0, 0xA1A1A1,
+            0x737373, 0x525252, 0x424242, 0x2A2A2A, 0x171717,
+        ])
+
+        /// Brand primary / blueberry blue — solid `#5080FF`; interactive primary uses tint 700.
+        static let blue = TokenColorScale(name: "Blue", [
+            0xEEF3FF, 0xD9E4FF, 0xB8CCFF, 0x8FABFF, 0x6E95FF,
+            0x5080FF, 0x3B66E0, 0x2C4FB5, 0x1E3785, 0x122152,
+        ])
+
+        static let tomato = TokenColorScale(name: "Tomato", [
+            0xFFF1F0, 0xFFD9D7, 0xFFB3AF, 0xFF8A84, 0xFF655E,
+            0xFF4A45, 0xE02F2A, 0xB52420, 0x851A17, 0x54110F,
+        ])
+
+        static let tangerine = TokenColorScale(name: "Tangerine", [
+            0xFFF4EB, 0xFFE4CC, 0xFFC999, 0xFFAF66, 0xFF9A4D,
+            0xFF8A38, 0xE06E1F, 0xB55616, 0x853E10, 0x54280A,
+        ])
+
+        static let gold = TokenColorScale(name: "Gold", [
+            0xFFF8E6, 0xFFECB8, 0xFFDC7A, 0xFFCB3D, 0xFABA14,
+            0xF0A800, 0xCC8F00, 0xA37200, 0x755200, 0x473200,
+        ])
+
+        static let sage = TokenColorScale(name: "Sage", [
+            0xEAFBF2, 0xC9F5DE, 0x93E8BD, 0x5CD99A, 0x3DD188,
+            0x2EC87A, 0x24A664, 0x1B824E, 0x135C38, 0x0C3A23,
+        ])
+
+        static let peacock = TokenColorScale(name: "Peacock", [
+            0xE6F9FC, 0xB8F0F8, 0x70E0EF, 0x33CEED, 0x12C2E0,
+            0x00B4D4, 0x0096B0, 0x00778C, 0x005566, 0x003540,
+        ])
+
+        static let grape = TokenColorScale(name: "Grape", [
+            0xF5F0FE, 0xE6DAFC, 0xCDB4F9, 0xB48FF5, 0xA878F2,
+            0x9D66F0, 0x824ED4, 0x663AAE, 0x4A2880, 0x2E1852,
+        ])
+
+        static let flamingo = TokenColorScale(name: "Flamingo", [
+            0xFFF0F5, 0xFFD6E4, 0xFFADD0, 0xFF7AB0, 0xF8629A,
+            0xF04E88, 0xD1366E, 0xA82856, 0x7A1D3E, 0x4C1226,
+        ])
+
+        /// Annotation picker order (solid stops feed `Color.annotationPalette`).
+        static let annotation: [TokenColorScale] = [
+            tomato, tangerine, gold, sage, peacock, blue, grape, flamingo,
+        ]
+
+        /// All named ramps for kitchen sink / tooling.
+        static let all: [TokenColorScale] = [
+            gray, blue, tomato, tangerine, gold, sage, peacock, grape, flamingo,
+        ]
     }
 
     // MARK: Typography
@@ -214,10 +324,12 @@ enum DesignTokens {
         static let body = TokenFont(size: 14, weight: .medium)
         static let bodyEmphasized = TokenFont(size: 14, weight: .semibold)
         static let title = TokenFont(size: 14, weight: .semibold)
+        /// Window / heading-bar app name (View All, etc.).
+        static let windowTitle = TokenFont(size: 12, weight: .semibold)
         static let panelTitle = TokenFont(size: 18, weight: .semibold)
 
         enum Style {
-            case caption, label, body, bodyEmphasized, title, panelTitle
+            case caption, label, body, bodyEmphasized, title, windowTitle, panelTitle
 
             var token: TokenFont {
                 switch self {
@@ -226,6 +338,7 @@ enum DesignTokens {
                 case .body:            return Typography.body
                 case .bodyEmphasized:  return Typography.bodyEmphasized
                 case .title:           return Typography.title
+                case .windowTitle:     return Typography.windowTitle
                 case .panelTitle:      return Typography.panelTitle
                 }
             }
@@ -405,6 +518,7 @@ struct SnipsnapButtonStyle: ButtonStyle {
             .overlay(borderOverlay)
             .opacity(isEnabled ? 1 : 0.4)
             .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+            .pointerStyle(.link)
     }
 
     private var foreground: Color {

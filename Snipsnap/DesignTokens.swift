@@ -11,6 +11,7 @@
 
 import AppKit
 import CoreImage
+import CoreText
 import SwiftUI
 
 // MARK: - Dual-platform tokens
@@ -32,29 +33,20 @@ struct TokenGradient {
 }
 
 /// A type-scale step available as both `NSFont` and SwiftUI `Font`.
+/// Sizes are in Apple points (pt) — AppKit/SwiftUI’s logical unit, not CSS px.
 struct TokenFont {
     let size: CGFloat
     let weight: NSFont.Weight
 
-    var ns: NSFont { NSFont.systemFont(ofSize: size, weight: weight) }
+    var ns: NSFont { DesignTokens.Typography.font(size: size, weight: weight) }
 
     var swiftUI: Font {
-        Font.system(size: size, weight: Self.swiftUIWeight(weight))
+        Font.custom(DesignTokens.Typography.postScriptName(for: weight), size: size)
     }
 
-    private static func swiftUIWeight(_ weight: NSFont.Weight) -> Font.Weight {
-        switch weight {
-        case .ultraLight: return .ultraLight
-        case .thin:       return .thin
-        case .light:      return .light
-        case .regular:    return .regular
-        case .medium:     return .medium
-        case .semibold:   return .semibold
-        case .bold:       return .bold
-        case .heavy:      return .heavy
-        case .black:      return .black
-        default:          return .regular
-        }
+    /// Display name for kitchen sink / debugging (e.g. "Geist Medium").
+    var typefaceLabel: String {
+        "Geist \(DesignTokens.Typography.weightName(weight))"
     }
 }
 
@@ -103,28 +95,56 @@ enum DesignTokens {
         static let panelHoverFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.10))
         static let panelActiveFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.14))
 
-        /// Selected list row in the capture library sidebar. HSL L=93.
-        static let listSelectionFill = neutralSurface(lightness: 0.93)
+        /// Selected list / chip fill. Light L=93, dark L=22.
+        static let listSelectionFill = dynamicNeutralSurface(light: 0.93, dark: 0.22)
 
         /// Neutral surface at HSL lightness (achromatic). AppKit HSB brightness matches HSL L when S=0.
         static func neutralSurface(lightness: CGFloat) -> TokenColor {
             TokenColor(ns: NSColor(calibratedHue: 0, saturation: 0, brightness: lightness, alpha: 1))
         }
 
-        /// Active toolbar controls, tooltips. HSL L=15.
-        static let primary = neutralSurface(lightness: 0.15)
+        /// Appearance-aware neutral surface (content windows follow system light/dark).
+        static func dynamicNeutralSurface(light: CGFloat, dark: CGFloat) -> TokenColor {
+            TokenColor(ns: NSColor(name: nil, dynamicProvider: { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return NSColor(
+                    calibratedHue: 0,
+                    saturation: 0,
+                    brightness: isDark ? dark : light,
+                    alpha: 1
+                )
+            }))
+        }
+
+        private static func dynamicAlphaFill(light: NSColor, dark: NSColor) -> TokenColor {
+            TokenColor(ns: NSColor(name: nil, dynamicProvider: { appearance in
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            }))
+        }
+
+        /// Active toolbar controls, emphasis strokes. Light L=15, dark L=90.
+        static let primary = dynamicNeutralSurface(light: 0.15, dark: 0.90)
 
         /// Icons and labels on `primary` surfaces.
-        static let textOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.85))
+        static let textOnPrimary = dynamicAlphaFill(
+            light: NSColor.white.withAlphaComponent(0.85),
+            dark: NSColor.black.withAlphaComponent(0.85)
+        )
 
         /// Dividers on `primary` surfaces.
-        static let borderOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.12))
+        static let borderOnPrimary = dynamicAlphaFill(
+            light: NSColor.white.withAlphaComponent(0.12),
+            dark: NSColor.black.withAlphaComponent(0.12)
+        )
 
-        /// Light floating panel surface (annotation toolbar, spotlight preferences). HSL L=97.
-        static let panelSurface = neutralSurface(lightness: 0.97)
+        /// Floating / elevated panel surface. Light L=97, dark L=18.
+        static let panelSurface = dynamicNeutralSurface(light: 0.97, dark: 0.18)
 
         /// Dividers on `panelSurface`.
-        static let borderOnPanel = TokenColor(ns: NSColor.black.withAlphaComponent(0.12))
+        static let borderOnPanel = dynamicAlphaFill(
+            light: NSColor.black.withAlphaComponent(0.12),
+            dark: NSColor.white.withAlphaComponent(0.12)
+        )
 
         // Brand
 
@@ -180,12 +200,19 @@ enum DesignTokens {
 
     // MARK: Typography
     // Named `Typography` rather than `Type` — `DesignTokens.Type` is the metatype in Swift.
+    //
+    // Units: sizes and spacing use Apple points (pt). On a 1× display 1 pt = 1 px;
+    // on Retina 1 pt = 2 device pixels. There is no separate px scale in AppKit —
+    // pass these numbers straight through (14 pt body ≈ 14 CSS px at 100% / 1×).
 
     enum Typography {
-        static let caption = TokenFont(size: 11, weight: .regular)
+        static let familyName = "Geist"
+        static let monoFamilyName = "Geist Mono"
+
+        static let caption = TokenFont(size: 12, weight: .regular)
         static let label = TokenFont(size: 12, weight: .medium)
-        static let body = TokenFont(size: 13, weight: .medium)
-        static let bodyEmphasized = TokenFont(size: 13, weight: .semibold)
+        static let body = TokenFont(size: 14, weight: .medium)
+        static let bodyEmphasized = TokenFont(size: 14, weight: .semibold)
         static let title = TokenFont(size: 14, weight: .semibold)
         static let panelTitle = TokenFont(size: 18, weight: .semibold)
 
@@ -201,6 +228,73 @@ enum DesignTokens {
                 case .title:           return Typography.title
                 case .panelTitle:      return Typography.panelTitle
                 }
+            }
+        }
+
+        static func registerBundledFonts() {
+            let fileNames = [
+                "Geist-Regular", "Geist-Medium", "Geist-SemiBold", "Geist-Bold",
+                "GeistMono-Regular", "GeistMono-Medium",
+            ]
+            for name in fileNames {
+                guard let url = Bundle.main.url(forResource: name, withExtension: "ttf") else { continue }
+                CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+            }
+        }
+
+        static func postScriptName(for weight: NSFont.Weight) -> String {
+            switch weight {
+            case .ultraLight, .thin, .light, .regular:
+                return "Geist-Regular"
+            case .medium:
+                return "Geist-Medium"
+            case .semibold:
+                return "Geist-SemiBold"
+            case .bold, .heavy, .black:
+                return "Geist-Bold"
+            default:
+                return weight.rawValue < NSFont.Weight.medium.rawValue
+                    ? "Geist-Regular"
+                    : weight.rawValue < NSFont.Weight.semibold.rawValue
+                        ? "Geist-Medium"
+                        : weight.rawValue < NSFont.Weight.bold.rawValue
+                            ? "Geist-SemiBold"
+                            : "Geist-Bold"
+            }
+        }
+
+        static func monoPostScriptName(for weight: NSFont.Weight) -> String {
+            weight.rawValue >= NSFont.Weight.medium.rawValue
+                ? "GeistMono-Medium"
+                : "GeistMono-Regular"
+        }
+
+        static func font(size: CGFloat, weight: NSFont.Weight) -> NSFont {
+            NSFont(name: postScriptName(for: weight), size: size)
+                ?? NSFont.systemFont(ofSize: size, weight: weight)
+        }
+
+        static func monoFont(size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+            NSFont(name: monoPostScriptName(for: weight), size: size)
+                ?? NSFont.monospacedSystemFont(ofSize: size, weight: weight)
+        }
+
+        static func monoSwiftUI(size: CGFloat, weight: NSFont.Weight = .regular) -> Font {
+            Font.custom(monoPostScriptName(for: weight), size: size)
+        }
+
+        static func weightName(_ weight: NSFont.Weight) -> String {
+            switch weight {
+            case .ultraLight: return "Ultralight"
+            case .thin:       return "Thin"
+            case .light:      return "Light"
+            case .regular:    return "Regular"
+            case .medium:     return "Medium"
+            case .semibold:   return "Semibold"
+            case .bold:       return "Bold"
+            case .heavy:      return "Heavy"
+            case .black:      return "Black"
+            default:          return "Regular"
             }
         }
     }
@@ -271,4 +365,77 @@ extension NSFont {
     static func snipsnap(_ style: DesignTokens.Typography.Style) -> NSFont {
         style.token.ns
     }
+}
+
+// MARK: - Buttons
+
+/// Custom content-window button — Geist type, token colors, no AppKit chrome.
+/// Compact Vercel-like sizing: 14 pt Medium, tight padding.
+struct SnipsnapButtonStyle: ButtonStyle {
+    enum Kind {
+        /// Filled primary action (Confirm, default).
+        case prominent
+        /// Outlined / soft secondary action (Cancel, Reject, Auto-Tag).
+        case secondary
+    }
+
+    enum Size {
+        case regular
+        case compact
+    }
+
+    var kind: Kind = .secondary
+    var size: Size = .regular
+
+    @Environment(\.isEnabled) private var isEnabled
+
+    private static let labelFont = Font.custom(
+        DesignTokens.Typography.postScriptName(for: .medium),
+        size: 14
+    )
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Self.labelFont)
+            .foregroundStyle(foreground)
+            .padding(.horizontal, size == .compact ? 8 : 10)
+            .padding(.vertical, size == .compact ? 2 : 4)
+            .background(background(isPressed: configuration.isPressed))
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+            .overlay(borderOverlay)
+            .opacity(isEnabled ? 1 : 0.4)
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+    }
+
+    private var foreground: Color {
+        switch kind {
+        case .prominent: return DesignTokens.Color.textOnPrimary.swiftUI
+        case .secondary: return DesignTokens.Color.textPrimary.swiftUI
+        }
+    }
+
+    @ViewBuilder
+    private func background(isPressed: Bool) -> some View {
+        let pressedOpacity = isPressed ? 0.82 : 1.0
+        switch kind {
+        case .prominent:
+            DesignTokens.Color.primary.swiftUI.opacity(pressedOpacity)
+        case .secondary:
+            DesignTokens.Color.listSelectionFill.swiftUI.opacity(pressedOpacity)
+        }
+    }
+
+    @ViewBuilder
+    private var borderOverlay: some View {
+        if kind == .secondary {
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                .stroke(DesignTokens.Color.border.swiftUI, lineWidth: 1)
+        }
+    }
+}
+
+extension ButtonStyle where Self == SnipsnapButtonStyle {
+    static var snipsnap: SnipsnapButtonStyle { SnipsnapButtonStyle() }
+    static var snipsnapProminent: SnipsnapButtonStyle { SnipsnapButtonStyle(kind: .prominent) }
+    static var snipsnapCompact: SnipsnapButtonStyle { SnipsnapButtonStyle(size: .compact) }
 }

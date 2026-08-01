@@ -28,19 +28,40 @@ enum CaptureNaming {
         "\(baseName(at: date)).png"
     }
 
-    static func uniqueURL(in directory: URL, preferredFilename: String) -> URL {
+    static func uniqueURL(
+        in directory: URL,
+        preferredFilename: String,
+        excluding existing: URL? = nil
+    ) -> URL {
         let fileManager = FileManager.default
+        let excluded = existing?.standardizedFileURL
         var candidate = directory.appendingPathComponent(preferredFilename)
-        guard fileManager.fileExists(atPath: candidate.path) else { return candidate }
+        if !isOccupied(candidate, excluding: excluded, fileManager: fileManager) {
+            return candidate
+        }
 
         let ext = candidate.pathExtension
         let stem = candidate.deletingPathExtension().lastPathComponent
         var counter = 2
         while true {
             candidate = directory.appendingPathComponent("\(stem) (\(counter)).\(ext)")
-            if !fileManager.fileExists(atPath: candidate.path) { return candidate }
+            if !isOccupied(candidate, excluding: excluded, fileManager: fileManager) {
+                return candidate
+            }
             counter += 1
         }
+    }
+
+    private static func isOccupied(
+        _ url: URL,
+        excluding: URL?,
+        fileManager: FileManager
+    ) -> Bool {
+        let standardized = url.standardizedFileURL
+        if let excluding, standardized == excluding {
+            return false
+        }
+        return fileManager.fileExists(atPath: standardized.path)
     }
 }
 
@@ -426,11 +447,12 @@ final class CaptureHistory {
         }
 
         let stored = storedCaptures[storedIndex]
-        let oldURL = URL(fileURLWithPath: stored.path)
+        let oldURL = URL(fileURLWithPath: stored.path).standardizedFileURL
         let newURL = CaptureNaming.uniqueURL(
             in: directory,
-            preferredFilename: oldURL.lastPathComponent
-        )
+            preferredFilename: oldURL.lastPathComponent,
+            excluding: oldURL
+        ).standardizedFileURL
 
         if oldURL != newURL {
             let fileManager = FileManager.default
@@ -451,6 +473,25 @@ final class CaptureHistory {
             tags: stored.tags
         )
         storedCaptures[storedIndex] = updatedStored
+
+        if let entryIndex = entries.firstIndex(where: { $0.id == id }) {
+            let entry = entries[entryIndex]
+            let updatedItem: CaptureItem
+            switch entry.item {
+            case .screenshot(let thumb):
+                updatedItem = .screenshot(thumb)
+            case .recording(_, let thumb):
+                updatedItem = .recording(url: newURL, thumbnail: thumb)
+            }
+            entries[entryIndex] = CaptureEntry(
+                id: entry.id,
+                createdAt: entry.createdAt,
+                item: updatedItem,
+                customName: entry.customName,
+                tags: entry.tags
+            )
+        }
+
         persist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
         return newURL
@@ -606,6 +647,11 @@ final class CaptureHistory {
         let stored = storedCaptures[storedIndex]
         var tags = stored.tags
         transform(&tags)
+        // Project is the on-disk folder — keep at most one.
+        if let project = tags.first(where: { $0.kind == .project }) {
+            tags.removeAll { $0.kind == .project }
+            tags.insert(project, at: 0)
+        }
         tags = CaptureTag.sorted(tags)
 
         storedCaptures[storedIndex] = StoredCapture(

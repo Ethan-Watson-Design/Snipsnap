@@ -153,8 +153,10 @@ struct OrganizePreviewSheet: View {
     private var footer: some View {
         HStack {
             Button("Cancel", action: onCancel)
+                .buttonStyle(.snipsnap)
             Spacer()
             Button("Confirm", action: onConfirm)
+                .buttonStyle(.snipsnapProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(isLoading || !plan.matchedItems.contains(where: \.isChecked))
         }

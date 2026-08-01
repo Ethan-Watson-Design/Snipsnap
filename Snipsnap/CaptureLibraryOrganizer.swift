@@ -222,6 +222,7 @@ enum CaptureLibraryOrganizer {
         }
 
         if suggestion.hasProject, let project = suggestion.suggestedProject {
+            // Sole project tag + move into `{saveRoot}/{project}/`.
             _ = CaptureHistory.shared.setProjectTag(id: entry.id, name: project)
             if let windowInfo {
                 let destination = CaptureDestination(

@@ -10,21 +10,23 @@ import QuartzCore
 final class ZoomablePlayerView: NSView {
 
     let player: AVPlayer
-    /// Shared transform parent: video + fixed dashed border stay locked to the recording.
+    /// Transform parent for video only — read-only selection stays fixed in view space.
     private let zoomContainer = CALayer()
     private let playerLayer = AVPlayerLayer()
     private let selectionBorderLayer = CAShapeLayer()
     private var updateTimer: Timer?
 
     var zoomAnnotationsProvider: () -> [PlacedAnnotation] = { [] }
+    /// Selected zoom rect in canvas space, if any. During play/scrub this region is drawn
+    /// as a faded, non-interactive outline for the whole video (not only while zoomed).
+    var selectedZoomRectProvider: () -> CGRect? = { nil }
     /// When true, paused preview skips settled zoom so the region can be edited on the raw frame.
     var prefersRawVideoForZoomEditing: () -> Bool = { false }
     var playbackTime: Double = 0
     var canvasSize: CGSize = .zero
-    /// Real recording pixel size (orientation-corrected). The editor window is an arbitrary
-    /// fixed size, so when its aspect ratio doesn't exactly match the recording, the video
-    /// letterboxes inside it. Zoom must target the recording's actual content — not the raw
-    /// canvas — or the crop drifts away from the fixed dashed border as it scales up.
+    /// Real recording pixel size (orientation-corrected). The editor window is sized to match
+    /// this aspect so the player fills edge-to-edge; mediaSize still drives zoom math when
+    /// the window and recording diverge for any reason.
     var mediaSize: CGSize = .zero
     var isPlaybackActive: Bool = false
     var isScrubbing: Bool = false
@@ -43,13 +45,15 @@ final class ZoomablePlayerView: NSView {
         playerLayer.videoGravity = .resizeAspect
         zoomContainer.addSublayer(playerLayer)
 
+        // Fixed in view space (not inside zoomContainer) so the outline stays visible
+        // as a reference even while the video is fully zoomed.
         selectionBorderLayer.fillColor = nil
-        selectionBorderLayer.strokeColor = NSColor.systemBlue.cgColor
-        selectionBorderLayer.lineWidth = 2
-        selectionBorderLayer.lineDashPattern = [6, 3]
+        selectionBorderLayer.strokeColor = Self.readOnlySelectionStroke.cgColor
+        selectionBorderLayer.lineWidth = 1.5
+        selectionBorderLayer.lineDashPattern = nil
         selectionBorderLayer.opacity = 0
         selectionBorderLayer.isHidden = true
-        zoomContainer.addSublayer(selectionBorderLayer)
+        layer?.addSublayer(selectionBorderLayer)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -65,7 +69,7 @@ final class ZoomablePlayerView: NSView {
         zoomContainer.bounds = CGRect(origin: .zero, size: bounds.size)
         zoomContainer.position = CGPoint(x: bounds.midX, y: bounds.midY)
         playerLayer.frame = zoomContainer.bounds
-        selectionBorderLayer.frame = zoomContainer.bounds
+        selectionBorderLayer.frame = bounds
         updateZoomPreview()
         CATransaction.commit()
     }
@@ -113,8 +117,6 @@ final class ZoomablePlayerView: NSView {
 
         let editingRaw = prefersRawVideoForZoomEditing()
         let annotations = zoomAnnotationsProvider()
-        // Use the player bounds as the coordinate space so the zoom target matches
-        // the dashed border path exactly (both in view points on the recording).
         let viewSize = bounds.size
         let effectiveMediaSize: CGSize? = (mediaSize.width > 0 && mediaSize.height > 0) ? mediaSize : nil
 
@@ -134,38 +136,32 @@ final class ZoomablePlayerView: NSView {
         }
 
         zoomContainer.transform = ZoomEffect.layerTransform(zoom, viewSize: viewSize)
-        updateSelectionBorder(annotations: annotations, mediaSize: effectiveMediaSize)
+        updateSelectionBorder(mediaSize: effectiveMediaSize)
     }
 
-    /// Border path is the fixed recording selection; container transform grows it.
-    /// Uses the exact same `ZoomEffect.selectionRect` mapping as the zoom target itself
-    /// (including the `mediaSize` letterbox correction) so the border can never disagree
-    /// with what's actually being zoomed into.
-    private func updateSelectionBorder(annotations: [PlacedAnnotation], mediaSize: CGSize?) {
+    /// Greyer, lightly faded selection blue — visual reference only during play/scrub.
+    private static let readOnlySelectionStroke: NSColor = {
+        let accent = NSColor.annotationSelectionAccent
+        let grey = NSColor(calibratedWhite: 0.55, alpha: 1)
+        let muted = accent.blended(withFraction: 0.45, of: grey) ?? accent
+        return muted.withAlphaComponent(0.45)
+    }()
+
+    /// Fixed read-only outline of the selected zoom for the entire play/scrub session.
+    private func updateSelectionBorder(mediaSize: CGSize?) {
         guard isPlaybackActive || isScrubbing else {
             hideSelectionBorder()
             return
         }
 
-        let zoomAnnotations = annotations.filter {
-            if case .zoom = $0.content { return true }
-            return false
-        }
-        guard let placed = ZoomEffect.activeAnnotation(at: playbackTime, from: zoomAnnotations),
-              case let .zoom(rect) = placed.content else {
-            hideSelectionBorder()
-            return
-        }
-
-        let weight = ZoomEffect.progress(at: playbackTime, for: placed)
-        let opacity = max(0, 1 - weight)
-        guard weight > 0.001, weight < 0.999, opacity > 0.02 else {
+        // Only while a zoom is selected — never as an unsolicited guide.
+        guard let selectedRect = selectedZoomRectProvider() else {
             hideSelectionBorder()
             return
         }
 
         guard let viewRect = ZoomEffect.selectionRect(
-            zoomRect: rect,
+            zoomRect: selectedRect,
             outputSize: bounds.size,
             canvasSize: canvasSize.width > 0 ? canvasSize : bounds.size,
             mediaSize: mediaSize
@@ -174,8 +170,9 @@ final class ZoomablePlayerView: NSView {
             return
         }
 
+        selectionBorderLayer.strokeColor = Self.readOnlySelectionStroke.cgColor
         selectionBorderLayer.path = CGPath(rect: viewRect, transform: nil)
-        selectionBorderLayer.opacity = Float(opacity)
+        selectionBorderLayer.opacity = 1
         selectionBorderLayer.isHidden = false
     }
 

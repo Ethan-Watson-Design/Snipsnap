@@ -111,7 +111,7 @@ enum ZoomEffect {
 
     /// Builds a zoom that always aims at the fixed selection on the unzoomed frame.
     /// Uses aspect-fill (`max`) so the settled frame is strictly inside the selection
-    /// (fit/`min` would letterbox and reveal pixels outside the dashed border).
+    /// (fit/`min` would letterbox and reveal pixels outside the selection border).
     private static func transform(
         to targetRect: CGRect,
         progress: CGFloat,
@@ -219,7 +219,7 @@ enum ZoomEffect {
     }
 
     /// Maps a canvas-space zoom selection into a fixed rect in `outputSize` coordinates.
-    /// Exposed (not private) so the live preview can align its dashed border to the exact
+    /// Exposed (not private) so the live preview can align its read-only selection border to the exact
     /// same rect the zoom targets — both must use identical math or they'll disagree once
     /// `mediaSize` introduces letterboxing between the editor window and the real recording.
     static func selectionRect(

@@ -5,6 +5,7 @@
 
 import AppKit
 import Foundation
+import SwiftUI
 
 enum AppSettings {
     private static let destinationFolderKey = "destinationFolderPath"
@@ -65,165 +66,175 @@ enum AppSettings {
 
 }
 
-final class SettingsWindow: NSWindow {
+// MARK: - Settings panes
 
-    static var current: SettingsWindow?
+private enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
+    case general
+    case kitchenSink
 
-    private var destinationPathLabel: NSTextField!
+    var id: String { rawValue }
 
-    static func show() {
-        if current == nil {
-            current = SettingsWindow()
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .kitchenSink: return "Kitchen Sink"
         }
-        current?.refreshDestinationPathLabel()
-        current?.center()
-        current?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
     }
 
-    private init() {
-        super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 300),
-            styleMask: [.titled, .closable],
-            backing: .buffered,
-            defer: false
-        )
-        title = "Snipsnap Settings"
-        isReleasedWhenClosed = false
+    var systemImage: String {
+        switch self {
+        case .general: return "gearshape"
+        case .kitchenSink: return "square.grid.2x2"
+        }
+    }
+}
 
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: 300))
-        self.contentView = contentView
+private struct SettingsRootView: View {
+    @State private var selection: SettingsPane? = .general
 
-        buildContent(in: contentView)
+    var body: some View {
+        NavigationSplitView {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+                ForEach(SettingsPane.allCases) { pane in
+                    Button {
+                        selection = pane
+                    } label: {
+                        Label(pane.title, systemImage: pane.systemImage)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, DesignTokens.Spacing.md)
+                            .padding(.vertical, DesignTokens.Spacing.sm)
+                            .background(
+                                RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
+                                    .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(selection == pane ? 1 : 0))
+                            )
+                            .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(DesignTokens.Spacing.md)
+            .background(DesignTokens.Color.background.swiftUI)
+            .navigationSplitViewColumnWidth(min: 160, ideal: 180, max: 220)
+        } detail: {
+            Group {
+                switch selection ?? .general {
+                case .general:
+                    GeneralSettingsView()
+                case .kitchenSink:
+                    KitchenSinkView()
+                }
+            }
+            .background(DesignTokens.Color.background.swiftUI)
+        }
+        .background(DesignTokens.Color.background.swiftUI)
+        .frame(minWidth: 720, minHeight: 480)
+    }
+}
+
+// MARK: - General
+
+private struct GeneralSettingsView: View {
+    @State private var destinationPath = AppSettings.destinationFolderDisplayPath
+
+    private let shortcuts: [(String, [String])] = [
+        ("Snap Area", ["⌘", "⇧", "3"]),
+        ("Record Screen", ["⌘", "⇧", "4"]),
+        ("Clip Voice", ["⌘", "⇧", "5"]),
+    ]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxl) {
+                saveLocationSection
+                shortcutsSection
+            }
+            .padding(DesignTokens.Spacing.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(DesignTokens.Color.background.swiftUI)
     }
 
-    private func buildContent(in parent: NSView) {
-        let width: CGFloat = 380
-        let height: CGFloat = 300
-        let sideMargin: CGFloat = 20
-        let rowHeight: CGFloat = 44
+    private var saveLocationSection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+            sectionHeader("Save Location")
+            Divider()
+            HStack(spacing: DesignTokens.Spacing.md) {
+                Text("Save to")
+                    .font(.snipsnap(.body))
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                Text(destinationPath)
+                    .font(.snipsnap(.body))
+                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                Button("Change…") {
+                    chooseDestinationFolder()
+                }
+            }
+            .padding(.vertical, DesignTokens.Spacing.sm)
+        }
+    }
 
-        // "Save Location" section
-        let destHeader = NSTextField(labelWithString: "SAVE LOCATION")
-        destHeader.font = NSFont.snipsnap(.caption)
-        destHeader.textColor = DesignTokens.Color.textSecondary.ns
-        destHeader.frame = NSRect(x: sideMargin, y: height - 32, width: width - sideMargin * 2, height: 16)
-        parent.addSubview(destHeader)
+    private var shortcutsSection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+            sectionHeader("Shortcuts")
+            Divider()
 
-        let destTopSep = separator(y: height - 36, width: width)
-        parent.addSubview(destTopSep)
-
-        let destRowY = height - 36 - rowHeight
-
-        let destLabel = NSTextField(labelWithString: "Save to")
-        destLabel.font = NSFont.snipsnap(.body)
-        destLabel.textColor = DesignTokens.Color.textPrimary.ns
-        destLabel.frame = NSRect(x: sideMargin, y: destRowY + (rowHeight - 16) / 2, width: 52, height: 16)
-        parent.addSubview(destLabel)
-
-        destinationPathLabel = NSTextField(labelWithString: AppSettings.destinationFolderDisplayPath)
-        destinationPathLabel.font = NSFont.snipsnap(.body)
-        destinationPathLabel.textColor = DesignTokens.Color.textSecondary.ns
-        destinationPathLabel.lineBreakMode = .byTruncatingMiddle
-        destinationPathLabel.frame = NSRect(
-            x: sideMargin + 58,
-            y: destRowY + (rowHeight - 16) / 2,
-            width: width - sideMargin * 2 - 58 - 80,
-            height: 16
-        )
-        parent.addSubview(destinationPathLabel)
-
-        let changeButton = NSButton(title: "Change…", target: self, action: #selector(chooseDestinationFolder))
-        changeButton.bezelStyle = .rounded
-        changeButton.frame = NSRect(x: width - sideMargin - 72, y: destRowY + (rowHeight - 24) / 2, width: 72, height: 24)
-        parent.addSubview(changeButton)
-
-        let destBottomSep = separator(y: destRowY, width: width)
-        parent.addSubview(destBottomSep)
-
-        // "Shortcuts" section
-        let shortcutsTop = destRowY - 36
-
-        let header = NSTextField(labelWithString: "SHORTCUTS")
-        header.font = NSFont.snipsnap(.caption)
-        header.textColor = DesignTokens.Color.textSecondary.ns
-        header.frame = NSRect(x: sideMargin, y: shortcutsTop + 4, width: width - sideMargin * 2, height: 16)
-        parent.addSubview(header)
-
-        let topSep = separator(y: shortcutsTop, width: width)
-        parent.addSubview(topSep)
-
-        let shortcuts: [(String, [String])] = [
-            ("Snap Area",       ["⌘", "⇧", "3"]),
-            ("Record Screen",   ["⌘", "⇧", "4"]),
-            ("Clip Voice",        ["⌘", "⇧", "5"]),
-        ]
-
-        var rowTop = shortcutsTop
-
-        for (label, keys) in shortcuts {
-            let rowY = rowTop - rowHeight
-
-            let left = NSTextField(labelWithString: label)
-            left.font = NSFont.snipsnap(.body)
-            left.textColor = DesignTokens.Color.textPrimary.ns
-            left.frame = NSRect(x: sideMargin, y: rowY + (rowHeight - 16) / 2, width: 200, height: 16)
-            parent.addSubview(left)
-
-            let badgeRowWidth = CGFloat(keys.count) * 24 + CGFloat(keys.count - 1) * 3
-            var badgeX = width - sideMargin - badgeRowWidth
-            let badgeCenterY = rowY + (rowHeight - 22) / 2
-
-            for key in keys {
-                let badge = keyBadge(label: key, origin: NSPoint(x: badgeX, y: badgeCenterY))
-                parent.addSubview(badge)
-                badgeX += 24 + 3
+            ForEach(shortcuts, id: \.0) { label, keys in
+                HStack {
+                    Text(label)
+                        .font(.snipsnap(.body))
+                        .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                    Spacer()
+                    HStack(spacing: 3) {
+                        ForEach(keys, id: \.self) { key in
+                            Text(key)
+                                .font(DesignTokens.Typography.monoSwiftUI(size: DesignTokens.Typography.label.size))
+                                .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                                .frame(width: 24, height: 22)
+                                .background(
+                                    RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                                        .fill(DesignTokens.Color.surface.swiftUI)
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
+                                        .stroke(DesignTokens.Color.border.swiftUI, lineWidth: 0.5)
+                                )
+                        }
+                    }
+                }
+                .padding(.vertical, DesignTokens.Spacing.sm)
+                Divider()
             }
 
-            let sep = separator(y: rowY, width: width)
-            parent.addSubview(sep)
+            Button("Open Accessibility Settings for Snipsnap…") {
+                NSWorkspace.shared.open(
+                    URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+                )
+            }
+            .buttonStyle(.plain)
+            .font(.snipsnap(.caption))
+            .foregroundStyle(Color(nsColor: .linkColor))
+            .frame(maxWidth: .infinity)
 
-            rowTop = rowY
+            Text("Custom shortcuts coming soon")
+                .font(.snipsnap(.caption))
+                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
+                .frame(maxWidth: .infinity)
+                .padding(.top, DesignTokens.Spacing.xs)
         }
-
-        let accessibilityLink = NSButton(
-            title: "Open Accessibility Settings for Snipsnap…",
-            target: self,
-            action: #selector(openAccessibilitySettings)
-        )
-        accessibilityLink.bezelStyle = .inline
-        accessibilityLink.isBordered = false
-        accessibilityLink.font = NSFont.snipsnap(.caption)
-        accessibilityLink.contentTintColor = .linkColor
-        accessibilityLink.sizeToFit()
-        let linkSize = accessibilityLink.fittingSize
-        accessibilityLink.frame = NSRect(
-            x: (width - linkSize.width) / 2,
-            y: rowTop - 28,
-            width: linkSize.width,
-            height: linkSize.height
-        )
-        parent.addSubview(accessibilityLink)
-
-        let note = NSTextField(labelWithString: "Custom shortcuts coming soon")
-        note.font = NSFont.snipsnap(.caption)
-        note.textColor = DesignTokens.Color.textTertiary.ns
-        note.alignment = .center
-        note.frame = NSRect(x: sideMargin, y: 12, width: width - sideMargin * 2, height: 14)
-        parent.addSubview(note)
     }
 
-    private func refreshDestinationPathLabel() {
-        destinationPathLabel?.stringValue = AppSettings.destinationFolderDisplayPath
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.snipsnap(.caption))
+            .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
     }
 
-    @objc private func openAccessibilitySettings() {
-        NSWorkspace.shared.open(
-            URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        )
-    }
-
-    @objc private func chooseDestinationFolder() {
+    private func chooseDestinationFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -233,37 +244,44 @@ final class SettingsWindow: NSWindow {
         panel.message = "Choose where Snipsnap saves recordings."
         panel.directoryURL = AppSettings.destinationFolderURL
 
-        panel.begin { [weak self] response in
+        panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             AppSettings.destinationFolderURL = url
             DispatchQueue.main.async {
-                self?.refreshDestinationPathLabel()
+                destinationPath = AppSettings.destinationFolderDisplayPath
             }
         }
     }
+}
 
-    private func separator(y: CGFloat, width: CGFloat) -> NSView {
-        let line = NSView(frame: NSRect(x: 0, y: y, width: width, height: 1))
-        line.wantsLayer = true
-        line.layer?.backgroundColor = DesignTokens.Color.border.cg
-        return line
+// MARK: - Window
+
+final class SettingsWindow: NSWindow {
+
+    static var current: SettingsWindow?
+
+    static func show() {
+        if current == nil {
+            current = SettingsWindow()
+        }
+        current?.center()
+        current?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func keyBadge(label: String, origin: NSPoint) -> NSView {
-        let container = NSView(frame: NSRect(origin: origin, size: NSSize(width: 24, height: 22)))
-        container.wantsLayer = true
-        container.layer?.backgroundColor = DesignTokens.Color.surface.cg
-        container.layer?.cornerRadius = DesignTokens.Radius.sm
-        container.layer?.borderWidth = 0.5
-        container.layer?.borderColor = DesignTokens.Color.border.cg
+    private init() {
+        super.init(
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        title = "Snipsnap Settings"
+        isReleasedWhenClosed = false
+        minSize = NSSize(width: 640, height: 420)
 
-        let text = NSTextField(labelWithString: label)
-        text.font = NSFont.monospacedSystemFont(ofSize: DesignTokens.Typography.label.size, weight: .regular)
-        text.textColor = DesignTokens.Color.textPrimary.ns
-        text.alignment = .center
-        text.frame = NSRect(x: 0, y: 3, width: 24, height: 16)
-        container.addSubview(text)
-
-        return container
+        let hosting = NSHostingView(rootView: SettingsRootView())
+        hosting.frame = NSRect(x: 0, y: 0, width: 780, height: 560)
+        contentView = hosting
     }
 }

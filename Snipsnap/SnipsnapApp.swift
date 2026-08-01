@@ -11,70 +11,17 @@ import AVFoundation
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private static let menuBarIconImage: NSImage = {
-        let side: CGFloat = 16
-        let scale: CGFloat = 2
-        let pixelSide = Int(side * scale)
-        let cornerRadius: CGFloat = 5
-
-        guard let bitmap = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: pixelSide,
-            pixelsHigh: pixelSide,
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            return NSImage(
-                systemSymbolName: "rectangle.dashed.badge.record",
-                accessibilityDescription: "Snipsnap"
-            ) ?? NSImage()
+        if let base = NSImage(named: "MenuBarIcon"),
+           let image = base.copy() as? NSImage {
+            // Landscape filled rabbit matching the cross-stitch silhouette.
+            image.size = NSSize(width: 25, height: 12)
+            image.isTemplate = true
+            return image
         }
-        bitmap.size = NSSize(width: side, height: side)
-
-        guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
-            // If we can't get a context to draw into, bail out to the SF Symbol fallback
-            // instead of silently returning a blank/garbage bitmap.
-            return NSImage(
-                systemSymbolName: "rectangle.dashed.badge.record",
-                accessibilityDescription: "Snipsnap"
-            ) ?? NSImage()
-        }
-
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        context.imageInterpolation = .high
-
-        let rect = NSRect(x: 0, y: 0, width: side, height: side)
-        NSColor.clear.setFill()
-        NSBezierPath(rect: rect).fill()
-
-        let background = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        NSColor(white: 1.0, alpha: 0.88).setFill()
-        background.fill()
-
-        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
-        let text = NSAttributedString(
-            string: "*:",
-            attributes: [.font: font, .foregroundColor: NSColor.black]
-        )
-        let textSize = text.size()
-        let origin = NSPoint(
-            x: (side - textSize.width) / 2,
-            y: (side - textSize.height) / 2
-        )
-
-        context.compositingOperation = .destinationOut
-        text.draw(at: origin)
-        NSGraphicsContext.restoreGraphicsState()
-
-        let image = NSImage(size: NSSize(width: side, height: side))
-        image.addRepresentation(bitmap)
-        image.isTemplate = false
-        return image
+        return NSImage(
+            systemSymbolName: "rectangle.dashed.badge.record",
+            accessibilityDescription: "Snipsnap"
+        ) ?? NSImage()
     }()
 
     private var statusItem: NSStatusItem!
@@ -86,9 +33,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingTimerSource: DispatchSourceTimer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DesignTokens.Typography.registerBundledFonts()
+
         NSApp.setActivationPolicy(.accessory)
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
             applyIdleStatusItemAppearance(to: button)
@@ -431,7 +380,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         recordingTimerSource?.cancel()
         recordingTimerSource = nil
         recordingElapsedSeconds = 0
-        statusItem.length = NSStatusItem.squareLength
+        statusItem.length = NSStatusItem.variableLength
         if let button = statusItem.button {
             button.action = nil
             button.target = nil

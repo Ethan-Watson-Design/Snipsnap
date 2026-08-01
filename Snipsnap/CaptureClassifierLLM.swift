@@ -20,7 +20,7 @@ private struct LLMRenameAndProjectResult {
     @Guide(description: "Optional product flow or screen name (e.g. Checkout, Onboarding, Settings). Empty when unclear.")
     var suggestedFlow: String
 
-    @Guide(description: "Comma-separated UI component tags visible in the capture (e.g. Navigation Bar, Modal, Button). Empty when unclear. Max 6.")
+    @Guide(description: "Comma-separated UI component types visible in the capture. Use short UI primitives only (Button, Tab, Data Grid, Modal, Text Field, Navigation Bar, Sidebar, Card, Toast, Form, Dropdown, Table, List, Chart). Never use project names, screen names, or feature names. Empty when unclear. Max 6.")
     var suggestedComponents: String
 
     @Guide(description: "Confidence from 0 to 1")
@@ -60,8 +60,10 @@ enum CaptureClassifierLLM {
             1) A concise filename (no extension)
             2) An optional project/folder name (the product or codebase)
             3) An optional flow name (user journey or screen group, e.g. Checkout, Onboarding)
-            4) UI component tags visible in the capture (Navigation Bar, Modal, Button, Tab Bar, Form, Card, Sidebar, Toast, etc.)
-            Prefer concrete UI/feature names visible in the capture over generic labels.
+            4) UI component tags — only reusable UI primitives visible in the capture \
+            (Button, Tab, Data Grid, Modal, Text Field, Navigation Bar, Sidebar, Card, Toast, Form, Dropdown, Table, List, Chart, Toggle, Badge).
+            Components must be UI building blocks, not projects, screens, flows, or feature names.
+            Prefer the shortest standard component name (e.g. "Button" not "Primary CTA Button", "Modal" not "Delete Confirmation Modal").
             Leave fields empty when unclear. Components should be a comma-separated list of at most 6 items.
             """
         )
@@ -143,7 +145,8 @@ enum CaptureClassifierLLM {
             lines.append(
                 "A screenshot is attached (described below via OCR). " +
                 "Suggest a short descriptive filename, a project folder name, " +
-                "an optional flow name, and UI component tags."
+                "an optional flow name, and UI component types " +
+                "(Button, Tab, Data Grid, Modal, etc. — not project or screen names)."
             )
         case .projectOnly:
             lines.append(
@@ -171,13 +174,23 @@ enum CaptureClassifierLLM {
     private static func parseComponents(_ raw: String) -> [String] {
         raw
             .split(separator: ",")
-            .compactMap { sanitized(String($0)) }
+            .compactMap { sanitized(String($0)).map(canonicalizeComponent) }
             .reduce(into: [String]()) { result, name in
                 guard !result.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { return }
                 result.append(name)
             }
             .prefix(6)
             .map { $0 }
+    }
+
+    /// Prefer canonical vocabulary casing when the model returns a known UI component.
+    private static func canonicalizeComponent(_ name: String) -> String {
+        if let known = CaptureUIComponentVocabulary.common.first(where: {
+            $0.caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            return known
+        }
+        return name
     }
 
     private static func sanitized(_ raw: String?) -> String? {

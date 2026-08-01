@@ -17,6 +17,14 @@ struct CaptureTagBar: View {
     @State private var draftName = ""
     @FocusState private var addFieldFocused: Bool
 
+    /// Project is singular (the folder). Omit it from the add picker when one already exists.
+    private var availableKinds: [CaptureTagKind] {
+        if tags.contains(where: { $0.kind == .project }) {
+            return CaptureTagKind.allCases.filter { $0 != .project }
+        }
+        return Array(CaptureTagKind.allCases)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
             if !tags.isEmpty || isAdding {
@@ -45,6 +53,11 @@ struct CaptureTagBar: View {
 
     private func tagChip(_ tag: CaptureTag) -> some View {
         HStack(spacing: 4) {
+            if tag.kind == .project {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
+            }
             Text(tag.kind.displayName)
                 .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
             Text(tag.name)
@@ -57,7 +70,11 @@ struct CaptureTagBar: View {
                     .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
             }
             .buttonStyle(.plain)
-            .help("Remove \(tag.kind.displayName.lowercased()) tag")
+            .help(
+                tag.kind == .project
+                    ? "Remove project and move file back to save folder"
+                    : "Remove \(tag.kind.displayName.lowercased()) tag"
+            )
         }
         .font(.snipsnap(.caption))
         .padding(.horizontal, DesignTokens.Spacing.sm)
@@ -71,7 +88,7 @@ struct CaptureTagBar: View {
     private var addButton: some View {
         Button {
             isAdding = true
-            draftKind = .custom
+            draftKind = availableKinds.contains(.custom) ? .custom : (availableKinds.first ?? .custom)
             draftName = ""
             DispatchQueue.main.async {
                 addFieldFocused = true
@@ -93,7 +110,7 @@ struct CaptureTagBar: View {
     private var addTagField: some View {
         HStack(spacing: DesignTokens.Spacing.sm) {
             Picker("Kind", selection: $draftKind) {
-                ForEach(CaptureTagKind.allCases) { kind in
+                ForEach(availableKinds) { kind in
                     Text(kind.displayName).tag(kind)
                 }
             }
@@ -101,19 +118,23 @@ struct CaptureTagBar: View {
             .pickerStyle(.menu)
             .fixedSize()
 
-            TextField("Tag name", text: $draftName)
+            TextField(draftKind == .project ? "Project folder" : "Tag name", text: $draftName)
                 .textFieldStyle(.plain)
                 .font(.snipsnap(.caption))
                 .frame(minWidth: 100, maxWidth: 180)
                 .focused($addFieldFocused)
                 .onSubmit(commitAdd)
 
-            Button("Add") {
+            Button(draftKind == .project ? "Move" : "Add") {
                 commitAdd()
             }
-            .buttonStyle(.bordered)
-            .controlSize(.mini)
+            .buttonStyle(.snipsnapCompact)
             .disabled(CaptureTag.normalizeName(draftName).isEmpty)
+            .help(
+                draftKind == .project
+                    ? "Set project and move this capture into that folder"
+                    : "Add tag"
+            )
 
             Button {
                 cancelAdd()
@@ -132,6 +153,11 @@ struct CaptureTagBar: View {
         )
         .onExitCommand {
             cancelAdd()
+        }
+        .onChange(of: availableKinds.map(\.rawValue).joined(separator: ",")) { _, _ in
+            if !availableKinds.contains(draftKind) {
+                draftKind = availableKinds.first ?? .custom
+            }
         }
     }
 

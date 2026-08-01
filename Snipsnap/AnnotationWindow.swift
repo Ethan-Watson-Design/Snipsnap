@@ -831,6 +831,8 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     var onToolChanged: ((AnnotationTool) -> Void)?
     /// Called when Escape is pressed (with or without an active text field).
     var onEscapeAction: (() -> Void)?
+    /// Video mode: spacebar toggles play/pause.
+    var onTogglePlayback: (() -> Void)?
     /// Called just before the first mouse-down begins a new stroke/shape.
     var onWillDraw: (() -> Void)?
     /// Called when the user presses or releases the mouse while actively using a drag tool.
@@ -1041,6 +1043,8 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         return true
     }
 
+    var isEditingText: Bool { activeTextField != nil }
+
     func installUndoRedoKeyMonitor(for window: NSWindow) -> Any? {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak window] event in
             guard let self, let window, event.window === window else { return event }
@@ -1103,7 +1107,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
 
     private func shouldRenderOverlay(for content: Annotation, isCurrent: Bool = false) -> Bool {
         guard videoMode, case .zoom = content else { return true }
-        // Playing / scrubbing: player applies the zoom transform — hide the region.
+        // Playing / scrubbing: draw a solid read-only selection instead of the dashed zoom chrome.
         if isPlaybackActive || isScrubbing { return false }
         // In-progress placement: always show the drag border on the raw frame.
         if isCurrent { return true }
@@ -1121,11 +1125,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     /// relative to the full recording frame (never the currently zoomed view).
     var prefersRawVideoForZoomEditing: Bool {
         guard videoMode else { return false }
-        // Placing / about to place: always show the full unzoomed recording.
-        if selectedTool == .zoom { return true }
-        if case .zoom = currentAnnotation { return true }
-        // Editing an existing zoom: only while paused (not during play/scrub).
+        // Never freeze the preview while playing/scrubbing — zoom must still run.
         guard !isPlaybackActive, !isScrubbing else { return false }
+        // In-progress placement: always show the full unzoomed recording.
+        if case .zoom = currentAnnotation { return true }
+        if selectedTool == .zoom { return true }
+        // Editing an existing zoom while paused.
         guard let idx = selectedIndex, annotations.indices.contains(idx),
               case .zoom = annotations[idx].content else { return false }
         return annotations[idx].isVisible(at: playbackTime)
@@ -1144,14 +1149,6 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         selectDragMode = .none
         selectDragSavedState = nil
         selectDidDrag = false
-    }
-
-    /// Clears annotation selection when playback starts so only the fixed dashed
-    /// zoom border is shown (no active select handles on the canvas).
-    func clearSelectionForPlayback() {
-        cancelZoomGeometryDrag()
-        setSelectedIndex(nil)
-        needsDisplay = true
     }
 
     private func committedCropRect() -> CGRect? {
@@ -1212,8 +1209,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             if case .crop = content {
                 // Crop is edited via the crop tool, not select handles.
             } else if case .zoom = content, isPlaybackActive || isScrubbing {
-                // During play/scrub the player zooms into the fixed dashed border —
-                // don't draw the separate active selection handles on the canvas.
+                // Player draws a fixed read-only selection during play/scrub.
             } else {
             switch content {
             case let .arrow(from, to, bend, _, _, pathStyle, seed):
@@ -2597,6 +2593,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         }
 
         switch ch {
+        case " ":
+            guard videoMode, onTogglePlayback != nil, activeTextField == nil else {
+                super.keyDown(with: event)
+                return
+            }
+            onTogglePlayback?()
         case "s": activate(.select)
         case "d": activate(.draw)
         case "a": activate(.arrow)
@@ -6437,6 +6439,7 @@ final class AnnotationWindow: NSWindow {
                 laysContentBelowTitlebar: true
             )
         }
+        AnnotationTitlebarStyle.layoutCenteredTitle(in: self)
     }
 
     private func setupContentContainer() -> NSView? {
@@ -7045,13 +7048,19 @@ final class AnnotationWindow: NSWindow {
 
 final class AnnotationTitlebarTitleControl: NSButton {
     private let maxTitleWidth: CGFloat = 280
+    private let showsFileSettingsChrome: Bool
 
     var foregroundColor: NSColor = .labelColor {
         didSet { contentTintColor = foregroundColor }
     }
 
-    init(title: String, foregroundColor: NSColor = .labelColor) {
+    init(
+        title: String,
+        foregroundColor: NSColor = .labelColor,
+        showsFileSettingsChrome: Bool = true
+    ) {
         self.foregroundColor = foregroundColor
+        self.showsFileSettingsChrome = showsFileSettingsChrome
         super.init(frame: .zero)
         bezelStyle = .inline
         isBordered = false
@@ -7060,14 +7069,25 @@ final class AnnotationTitlebarTitleControl: NSButton {
         cell?.truncatesLastVisibleLine = true
         contentTintColor = foregroundColor
         setTitle(title)
-        toolTip = "Rename and file settings"
+        if showsFileSettingsChrome {
+            toolTip = "Rename and file settings"
+        } else {
+            toolTip = nil
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
+    override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
+        guard showsFileSettingsChrome else { return false }
+        return super.sendAction(action, to: target)
+    }
+
     override func resetCursorRects() {
         discardCursorRects()
-        addCursorRect(bounds, cursor: .pointingHand)
+        if showsFileSettingsChrome {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
     }
 
     func setTitle(_ title: String, maxWidth: CGFloat? = nil) {
@@ -7327,6 +7347,11 @@ enum AnnotationTitlebarStyle {
         accessory.layoutAttribute = .trailing
         accessory.view = view
         window.addTitlebarAccessoryViewController(accessory)
+        // Accessories finish positioning asynchronously — relayout the title so it
+        // doesn't sit under Save/Copy/More (especially on narrow aspect-fitted windows).
+        DispatchQueue.main.async {
+            layoutCenteredTitle(in: window)
+        }
     }
 
     private static let closeButtonLeftPadding = DesignTokens.Spacing.md
@@ -7365,6 +7390,8 @@ enum AnnotationTitlebarStyle {
             let accessoryView = accessory.view
             guard accessoryView.superview != nil else { continue }
             let frameInTitlebar = accessoryView.convert(accessoryView.bounds, to: titlebar)
+            // Ignore zero-size / not-yet-laid-out accessories so we don't clamp to 0.
+            guard frameInTitlebar.width > 1 else { continue }
             rightLimit = min(rightLimit, frameInTitlebar.minX - gap)
         }
 
@@ -7372,13 +7399,14 @@ enum AnnotationTitlebarStyle {
         if let titleControl = control as? AnnotationTitlebarTitleControl {
             titleControl.setTitle(titleControl.title, maxWidth: availableWidth)
         } else {
-            control.frame.size.width = min(control.frame.width, availableWidth)
+            control.frame.size.width = min(max(control.frame.width, 40), availableWidth)
         }
 
-        let barWidth = titlebar.bounds.width
         let controlWidth = control.frame.width
-        var x = ((barWidth - controlWidth) / 2).rounded(.down)
-        // Prefer centered; when the trailing Save/Copy/More bar is too close, pin left of it.
+        let idealX = ((titlebar.bounds.width - controlWidth) / 2).rounded(.down)
+        var x = idealX
+        // Keep the name fully inside [leftLimit, rightLimit]. When trailing buttons
+        // would force it off-center, pin beside the close button instead of overlapping.
         if x + controlWidth > rightLimit {
             x = rightLimit - controlWidth
         }

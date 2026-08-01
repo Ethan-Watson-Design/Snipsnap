@@ -170,7 +170,12 @@ enum AutoOrganizer {
                 return
             }
             toast.attachFolderSuggestion(destination) {
-                if moveCapture(id: captureID, to: destination, signature: windowInfo) {
+                // Project is hybrid: approving the folder sets the sole project tag and moves the file.
+                if CaptureHistory.shared.setProjectTag(id: captureID, name: destination.productFolder) {
+                    CaptureDestinationMappingCache.shared.confirm(
+                        signature: windowInfo,
+                        destination: destination
+                    )
                     windowInfoByCaptureID[captureID] = nil
                 }
             }

@@ -65,3 +65,53 @@ struct CaptureTag: Identifiable, Codable, Hashable {
         }
     }
 }
+
+/// Common UI-component labels for Auto-Tag suggestions and editing menus.
+enum CaptureUIComponentVocabulary {
+    static let common: Set<String> = [
+        "Button",
+        "Icon Button",
+        "Text Field",
+        "Search",
+        "Tab",
+        "Tab Bar",
+        "Navigation Bar",
+        "Sidebar",
+        "Modal",
+        "Dialog",
+        "Sheet",
+        "Drawer",
+        "Dropdown",
+        "Select",
+        "Checkbox",
+        "Radio",
+        "Toggle",
+        "Switch",
+        "Slider",
+        "Data Grid",
+        "Table",
+        "List",
+        "Card",
+        "Avatar",
+        "Badge",
+        "Chip",
+        "Toast",
+        "Alert",
+        "Banner",
+        "Tooltip",
+        "Popover",
+        "Pagination",
+        "Breadcrumb",
+        "Progress",
+        "Spinner",
+        "Chart",
+        "Calendar",
+        "Date Picker",
+        "Accordion",
+        "Menu",
+        "Toolbar",
+        "Form",
+        "Segmented Control",
+        "Empty State",
+    ]
+}

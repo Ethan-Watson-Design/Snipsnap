@@ -115,6 +115,30 @@ final class VideoTimelineView: NSView {
         return .moveSelection
     }
 
+    private func edgeHandleRects() -> (left: CGRect, right: CGRect)? {
+        guard let rect = selectionRect(in: trackRect(in: bounds)) else { return nil }
+        let minMoveWidth = handleWidth * 3
+        if rect.width >= minMoveWidth {
+            let left = CGRect(x: rect.minX, y: rect.minY, width: handleWidth, height: rect.height)
+            let right = CGRect(x: rect.maxX - handleWidth, y: rect.minY, width: handleWidth, height: rect.height)
+            return (left, right)
+        }
+        let edgeWidth = max(rect.width * 0.25, 1)
+        let left = CGRect(x: rect.minX, y: rect.minY, width: edgeWidth, height: rect.height)
+        let right = CGRect(x: rect.maxX - edgeWidth, y: rect.minY, width: edgeWidth, height: rect.height)
+        return (left, right)
+    }
+
+    override func resetCursorRects() {
+        guard let handles = edgeHandleRects() else { return }
+        addCursorRect(handles.left, cursor: .pointingHand)
+        addCursorRect(handles.right, cursor: .pointingHand)
+    }
+
+    private func invalidateEdgeCursors() {
+        window?.invalidateCursorRects(for: self)
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         let track = trackRect(in: bounds)
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
@@ -216,6 +240,7 @@ final class VideoTimelineView: NSView {
                 onSelectionStartChanged?(newStart)
             }
             needsDisplay = true
+            invalidateEdgeCursors()
 
         case .resizeStart:
             let newStart = max(0, min(timeForX(point.x, in: track), dragAnchorEndTime - minDuration))
@@ -225,6 +250,7 @@ final class VideoTimelineView: NSView {
             onSelectionStartChanged?(newStart)
             onSelectionDurationChanged?(newDuration)
             needsDisplay = true
+            invalidateEdgeCursors()
 
         case .resizeEnd:
             let newEnd = max((selectionStartTime ?? 0) + minDuration, min(timeForX(point.x, in: track), videoDuration))
@@ -233,6 +259,7 @@ final class VideoTimelineView: NSView {
             selectionVisibleDuration = newDuration
             onSelectionDurationChanged?(newDuration)
             needsDisplay = true
+            invalidateEdgeCursors()
 
         case .none:
             break
@@ -244,18 +271,21 @@ final class VideoTimelineView: NSView {
             onScrubEnded?()
         }
         dragMode = .none
+        invalidateEdgeCursors()
     }
 
     func configureSelection(startTime: Double, visibleDuration: Double?) {
         selectionStartTime = startTime
         selectionVisibleDuration = visibleDuration
         needsDisplay = true
+        invalidateEdgeCursors()
     }
 
     func clearSelection() {
         selectionStartTime = nil
         selectionVisibleDuration = nil
         needsDisplay = true
+        invalidateEdgeCursors()
     }
 }
 
@@ -286,11 +316,14 @@ final class VideoAnnotationWindow: NSWindow {
     private var timelineBg: NSView?
     private var rowSep: NSView?
 
-    private let videoAreaHeight: CGFloat = 492
+    /// Provisional video stage before the recording's real dimensions are known.
+    private let provisionalVideoStage = NSSize(width: 900, height: 536)
     private let timelineRowHeight: CGFloat = 44
-    private let toolbarRowHeight: CGFloat = 44
     private let toolbarBottomInset: CGFloat = 12
     private let timelineHorizontalInset: CGFloat = 12
+    private let playButtonWidth: CGFloat = 32
+    private let timeLabelWidth: CGFloat = 98
+    private let saveButtonWidth: CGFloat = 206
 
     // MARK: - Entry Point
 
@@ -310,7 +343,10 @@ final class VideoAnnotationWindow: NSWindow {
         self.playerView = ZoomablePlayerView(player: self.player, frame: .zero)
         self.canvas = AnnotationCanvasView(frame: .zero)
 
-        let windowSize = NSSize(width: 900, height: videoAreaHeight + toolbarRowHeight + timelineRowHeight)
+        let windowSize = NSSize(
+            width: provisionalVideoStage.width,
+            height: provisionalVideoStage.height + timelineRowHeight
+        )
         let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
         let styleMask: NSWindow.StyleMask = [.titled, .closable]
         let frameRect = NSWindow.frameRect(
@@ -342,13 +378,21 @@ final class VideoAnnotationWindow: NSWindow {
             usesSystemAppearance: true
         )
 
-        buildLayout(windowSize: windowSize)
+        let titleControl = AnnotationTitlebarTitleControl(
+            title: url.deletingPathExtension().lastPathComponent,
+            foregroundColor: .labelColor,
+            showsFileSettingsChrome: false
+        )
+        AnnotationTitlebarStyle.installCenteredTitle(titleControl, in: self)
+
+        buildLayout(videoStage: provisionalVideoStage)
         wire()
         player.play()
     }
 
     override func setFrame(_ frameRect: NSRect, display displayFlag: Bool) {
         super.setFrame(frameRect, display: displayFlag)
+        AnnotationTitlebarStyle.layoutCenteredTitle(in: self)
         if let contentContainer {
             AnnotationTitlebarStyle.layoutContentContainer(
                 contentContainer,
@@ -360,7 +404,63 @@ final class VideoAnnotationWindow: NSWindow {
 
     // MARK: - Layout
 
-    private func buildLayout(windowSize: NSSize) {
+    private func contentSize(forVideoStage stage: NSSize) -> NSSize {
+        NSSize(width: stage.width, height: stage.height + timelineRowHeight)
+    }
+
+    /// Size the player stage to the recording's aspect ratio so AVPlayerLayer doesn't pillarbox.
+    private func videoStageSize(for mediaSize: CGSize) -> CGSize {
+        var stage = AnnotationViewBackground.fittedStageSize(mediaSize)
+        let screen = NSScreen.main?.visibleFrame ?? .zero
+        let titlebarAllowance: CGFloat = 52
+        let maxH = max(200, screen.height - titlebarAllowance - timelineRowHeight)
+        let maxW = max(320, screen.width - 24)
+        let scale = min(1, maxW / max(stage.width, 1), maxH / max(stage.height, 1))
+        if scale < 1 {
+            stage = CGSize(
+                width: (stage.width * scale).rounded(),
+                height: (stage.height * scale).rounded()
+            )
+        }
+        return stage
+    }
+
+    private func fitWindowToMediaSize(_ mediaSize: CGSize) {
+        let stage = videoStageSize(for: mediaSize)
+        let windowSize = contentSize(forVideoStage: stage)
+        guard let root = contentContainer else { return }
+        if abs(root.bounds.width - windowSize.width) < 1,
+           abs(root.bounds.height - windowSize.height) < 1 {
+            layoutVideoChrome(videoStage: stage)
+            return
+        }
+
+        let styleMask = self.styleMask
+        let frameRect = NSWindow.frameRect(
+            forContentRect: NSRect(origin: .zero, size: windowSize),
+            styleMask: styleMask
+        )
+        let screen = self.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        var newFrame = NSRect(
+            x: frame.midX - frameRect.width / 2,
+            y: frame.midY - frameRect.height / 2,
+            width: frameRect.width,
+            height: frameRect.height
+        )
+        newFrame.origin.x = max(screen.minX, min(newFrame.origin.x, screen.maxX - newFrame.width))
+        newFrame.origin.y = max(screen.minY, min(newFrame.origin.y, screen.maxY - newFrame.height))
+
+        setFrame(newFrame, display: true)
+        layoutVideoChrome(videoStage: stage)
+        playerView.canvasSize = canvas.bounds.size
+        playerView.updateZoomPreview()
+        updateSpotlightCoordinateMapping()
+        canvas.needsDisplay = true
+    }
+
+    private func buildLayout(videoStage: NSSize) {
+        let windowSize = contentSize(forVideoStage: videoStage)
+
         pill = ToolbarPillView(
             frame: CGRect(x: 0, y: 0, width: 100, height: 44),
             availableTools: AnnotationTool.videoTools
@@ -376,51 +476,22 @@ final class VideoAnnotationWindow: NSWindow {
 
         let root = NSView(frame: NSRect(origin: .zero, size: windowSize))
 
-        let videoRect = NSRect(
-            x: 0,
-            y: timelineRowHeight,
-            width: windowSize.width,
-            height: videoAreaHeight + toolbarRowHeight
-        )
-
-        playerView.frame = videoRect
         root.addSubview(playerView)
-
-        canvas.frame = videoRect
         root.addSubview(canvas)
 
-        let timelineBg = NSView(frame: NSRect(x: 0, y: 0, width: windowSize.width, height: timelineRowHeight))
+        let timelineBg = NSView(frame: .zero)
         timelineBg.wantsLayer = true
         root.addSubview(timelineBg)
         self.timelineBg = timelineBg
 
-        let rowSep = NSView(frame: NSRect(x: 0, y: timelineRowHeight, width: windowSize.width, height: 1))
+        let rowSep = NSView(frame: .zero)
         rowSep.wantsLayer = true
         root.addSubview(rowSep)
         self.rowSep = rowSep
 
-        pill.frame.origin = ToolbarPillView.defaultOrigin(
-            pillSize: pill.frame.size,
-            in: videoRect.size,
-            bottomInset: toolbarBottomInset
-        )
-        pill.frame.origin.y += timelineRowHeight
-        pill.dragBounds = videoRect
         root.addSubview(pill)
-        let timelineMidY = timelineRowHeight / 2
-        let playButtonWidth: CGFloat = 32
-        let timeLabelWidth: CGFloat = 98
-        let saveButtonWidth: CGFloat = 206
-        let timelineX = timelineHorizontalInset + playButtonWidth + 8
-        let trailingInset = timelineHorizontalInset + saveButtonWidth + 8
-        let timelineWidth = windowSize.width - timelineX - timeLabelWidth - 8 - trailingInset
 
-        let ppBtn = NSButton(frame: CGRect(
-            x: timelineHorizontalInset,
-            y: timelineMidY - 16,
-            width: playButtonWidth,
-            height: 32
-        ))
+        let ppBtn = NSButton(frame: .zero)
         ppBtn.bezelStyle = .regularSquare
         ppBtn.isBordered = false
         ppBtn.imageScaling = .scaleProportionallyDown
@@ -430,36 +501,18 @@ final class VideoAnnotationWindow: NSWindow {
         self.playPauseButton = ppBtn
         updatePlayPauseButton(playing: false)
 
-        let tl = VideoTimelineView(frame: CGRect(
-            x: timelineX,
-            y: (timelineRowHeight - 28) / 2,
-            width: timelineWidth,
-            height: 28
-        ))
-        tl.autoresizingMask = [.width]
+        let tl = VideoTimelineView(frame: .zero)
         root.addSubview(tl)
         self.timeline = tl
 
         let tLabel = NSTextField(labelWithString: "0:00 / 0:00")
-        tLabel.frame = CGRect(
-            x: windowSize.width - trailingInset - timeLabelWidth,
-            y: (timelineRowHeight - 18) / 2,
-            width: timeLabelWidth,
-            height: 18
-        )
         tLabel.alignment = .right
         tLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         tLabel.textColor = .secondaryLabelColor
-        tLabel.autoresizingMask = [.minXMargin]
         root.addSubview(tLabel)
         self.timeLabel = tLabel
 
-        let saveBtn = NSButton(frame: CGRect(
-            x: windowSize.width - saveButtonWidth - timelineHorizontalInset,
-            y: (timelineRowHeight - 30) / 2,
-            width: saveButtonWidth,
-            height: 30
-        ))
+        let saveBtn = NSButton(frame: .zero)
         saveBtn.bezelStyle = .rounded
         saveBtn.title = "Save and show in Finder"
         saveBtn.target = self
@@ -476,8 +529,65 @@ final class VideoAnnotationWindow: NSWindow {
             in: self,
             laysContentBelowTitlebar: true
         )
+        layoutVideoChrome(videoStage: videoStage)
         makeFirstResponder(canvas)
         updateTimelineChromeAppearance()
+    }
+
+    private func layoutVideoChrome(videoStage: NSSize) {
+        let rootBounds = contentContainer?.bounds.size ?? contentSize(forVideoStage: videoStage)
+        let width = rootBounds.width
+        let videoHeight = max(1, rootBounds.height - timelineRowHeight)
+        let videoRect = NSRect(
+            x: 0,
+            y: timelineRowHeight,
+            width: width,
+            height: videoHeight
+        )
+
+        playerView.frame = videoRect
+        canvas.frame = videoRect
+
+        timelineBg?.frame = NSRect(x: 0, y: 0, width: width, height: timelineRowHeight)
+        rowSep?.frame = NSRect(x: 0, y: timelineRowHeight, width: width, height: 1)
+
+        pill.frame.origin = ToolbarPillView.defaultOrigin(
+            pillSize: pill.frame.size,
+            in: videoRect.size,
+            bottomInset: toolbarBottomInset
+        )
+        pill.frame.origin.y += timelineRowHeight
+        pill.dragBounds = videoRect
+
+        let timelineMidY = timelineRowHeight / 2
+        let timelineX = timelineHorizontalInset + playButtonWidth + 8
+        let trailingInset = timelineHorizontalInset + saveButtonWidth + 8
+        let timelineWidth = width - timelineX - timeLabelWidth - 8 - trailingInset
+
+        playPauseButton?.frame = CGRect(
+            x: timelineHorizontalInset,
+            y: timelineMidY - 16,
+            width: playButtonWidth,
+            height: 32
+        )
+        timeline?.frame = CGRect(
+            x: timelineX,
+            y: (timelineRowHeight - 28) / 2,
+            width: max(40, timelineWidth),
+            height: 28
+        )
+        timeLabel?.frame = CGRect(
+            x: width - trailingInset - timeLabelWidth,
+            y: (timelineRowHeight - 18) / 2,
+            width: timeLabelWidth,
+            height: 18
+        )
+        saveButton?.frame = CGRect(
+            x: width - saveButtonWidth - timelineHorizontalInset,
+            y: (timelineRowHeight - 30) / 2,
+            width: saveButtonWidth,
+            height: 30
+        )
     }
 
     private func updateTimelineChromeAppearance() {
@@ -585,6 +695,15 @@ final class VideoAnnotationWindow: NSWindow {
         playerView.zoomAnnotationsProvider = { [weak self] in
             self?.canvas.annotations ?? []
         }
+        playerView.selectedZoomRectProvider = { [weak self] in
+            guard let self,
+                  let idx = self.canvas.selectedIndex,
+                  self.canvas.annotations.indices.contains(idx),
+                  case let .zoom(rect) = self.canvas.annotations[idx].content else {
+                return nil
+            }
+            return rect
+        }
         playerView.prefersRawVideoForZoomEditing = { [weak self] in
             self?.canvas.prefersRawVideoForZoomEditing ?? false
         }
@@ -640,6 +759,10 @@ final class VideoAnnotationWindow: NSWindow {
 
         canvas.onWillDraw = { [weak self] in
             self?.pauseForZoomEditingIfNeeded()
+        }
+
+        canvas.onTogglePlayback = { [weak self] in
+            self?.togglePlayPause()
         }
 
         canvas.onToolChanged = { [weak self] tool in
@@ -765,14 +888,9 @@ final class VideoAnnotationWindow: NSWindow {
                 self.canvas.isPlaybackActive = playing
                 self.playerView.isPlaybackActive = playing
                 if playing {
+                    // Keep zoom selected as read-only during play (solid outline on
+                    // the player, no handles / no move-resize). Cancel any in-progress drag.
                     self.canvas.cancelZoomGeometryDrag()
-                    // Drop active zoom selection chrome — play only shows the
-                    // fixed dashed border and zooms into that recording rect.
-                    if let idx = self.canvas.selectedIndex,
-                       self.canvas.annotations.indices.contains(idx),
-                       case .zoom = self.canvas.annotations[idx].content {
-                        self.canvas.clearSelectionForPlayback()
-                    }
                 }
                 self.playerView.setContinuousUpdatesEnabled(playing || self.isScrubbing)
                 self.playerView.updateZoomPreview()
@@ -806,6 +924,7 @@ final class VideoAnnotationWindow: NSWindow {
                     self.videoNaturalSize = mediaSize
                     self.canvas.videoAspectRatio = mediaSize.width / mediaSize.height
                     self.playerView.mediaSize = mediaSize
+                    self.fitWindowToMediaSize(mediaSize)
                     self.playerView.updateZoomPreview()
                     self.updateSpotlightCoordinateMapping()
                 }
@@ -819,8 +938,30 @@ final class VideoAnnotationWindow: NSWindow {
             object: player.currentItem
         )
 
-        undoRedoKeyMonitor = canvas.installUndoRedoKeyMonitor(for: self)
+        undoRedoKeyMonitor = installKeyMonitor()
         updateToolbarAccessoryControls()
+    }
+
+    private func installKeyMonitor() -> Any? {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.window === self else { return event }
+            if self.canvas.handleUndoRedoKeyEquivalent(event) { return nil }
+            if self.shouldTogglePlayback(for: event) {
+                self.togglePlayPause()
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func shouldTogglePlayback(for event: NSEvent) -> Bool {
+        guard event.charactersIgnoringModifiers == " " else { return false }
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard mods.isEmpty || mods == .shift else { return false }
+        if canvas.isEditingText { return false }
+        if let resp = firstResponder as? NSTextView, resp.isFieldEditor { return false }
+        if firstResponder is NSTextField { return false }
+        return true
     }
 
     private func installPlaybackTimeObserver() {

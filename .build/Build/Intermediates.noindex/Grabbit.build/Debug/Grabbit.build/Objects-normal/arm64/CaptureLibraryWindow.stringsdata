@@ -1,0 +1,272 @@
+{
+  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/CaptureLibraryWindow.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "New Project",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 826
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom Flow",
+        "location": {
+          "startingColumn": 16,
+          "startingLine": 843
+        }
+      },
+      {
+        "comment": "",
+        "key": "Drag to resize",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 955
+        }
+      },
+      {
+        "comment": "",
+        "key": "Project name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 827
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 828
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 831
+        }
+      },
+      {
+        "comment": "",
+        "key": "Flow name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 844
+        }
+      },
+      {
+        "comment": "",
+        "key": "Cancel",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 845
+        }
+      },
+      {
+        "comment": "",
+        "key": "Create",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 848
+        }
+      },
+      {
+        "comment": "",
+        "key": "Screenshots and recordings will appear here.",
+        "location": {
+          "startingColumn": 39,
+          "startingLine": 973
+        }
+      },
+      {
+        "comment": "",
+        "key": "No Captures Yet",
+        "location": {
+          "startingColumn": 21,
+          "startingLine": 971
+        }
+      },
+      {
+        "comment": "",
+        "key": "Select a Capture",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1178
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose a screenshot or recording from the sidebar.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1182
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move to Trash",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 1264
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Rename",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1251
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show in Finder",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1256
+        }
+      },
+      {
+        "comment": "",
+        "key": "Rename",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1261
+        }
+      },
+      {
+        "comment": "",
+        "key": "Organized",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1713
+        }
+      },
+      {
+        "comment": "",
+        "key": "Revert rename and move",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1723
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 1759
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld selected",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 1810
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-tagging…",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 1823
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 58,
+          "startingLine": 1823
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-tagging…",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 1992
+        }
+      },
+      {
+        "comment": "",
+        "key": "Revert rename and move",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 2027
+        }
+      },
+      {
+        "comment": "",
+        "key": "Accept suggestion",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 2004
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dismiss suggestion",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 2015
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-tagging…",
+        "location": {
+          "startingColumn": 36,
+          "startingLine": 2212
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 56,
+          "startingLine": 2212
+        }
+      },
+      {
+        "comment": "",
+        "key": "No tags suggested",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 2302
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annotate",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 2288
+        }
+      },
+      {
+        "comment": "",
+        "key": "Accept suggestion",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 2365
+        }
+      },
+      {
+        "comment": "",
+        "key": "Dismiss suggestion",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 2376
+        }
+      }
+    ]
+  },
+  "version": 1
+}

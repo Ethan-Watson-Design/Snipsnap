@@ -768,9 +768,24 @@ private struct CaptureLibraryView: View {
     }
 
     private var projectGroups: [CaptureLibraryNamedGroup] {
-        namedGroups { entry in
-            [CaptureLibraryProject.currentName(for: entry) ?? "None"]
+        var grouped: [String: [CaptureEntry]] = [:]
+        // Seed with on-disk destination folders so empty projects still appear.
+        for name in CaptureLibraryOrganizer.existingProjectNames() {
+            grouped[name] = []
         }
+        for entry in entries {
+            let name = CaptureLibraryProject.currentName(for: entry) ?? "None"
+            grouped[name, default: []].append(entry)
+        }
+        return grouped.keys
+            .sorted { lhs, rhs in
+                if lhs == "None" { return false }
+                if rhs == "None" { return true }
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+            }
+            .map { key in
+                CaptureLibraryNamedGroup(name: key, entries: grouped[key] ?? [])
+            }
     }
 
     private var flowGroups: [CaptureLibraryNamedGroup] {

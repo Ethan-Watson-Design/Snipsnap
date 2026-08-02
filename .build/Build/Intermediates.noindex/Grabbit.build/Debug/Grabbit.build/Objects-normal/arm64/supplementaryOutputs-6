@@ -1,0 +1,30 @@
+{
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/ScreenshotEngine.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ScreenshotEngine.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ScreenshotEngine.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ScreenshotEngine.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ScreenshotEngine.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ScreenshotEngine.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/SettingsWindow.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SettingsWindow.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SettingsWindow.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SettingsWindow.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SettingsWindow.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SettingsWindow.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/ShipItPanel.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ShipItPanel.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ShipItPanel.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ShipItPanel.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ShipItPanel.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ShipItPanel.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/SideBySideLayout.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SideBySideLayout.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SideBySideLayout.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SideBySideLayout.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SideBySideLayout.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/SideBySideLayout.swiftdeps"
+  }
+}

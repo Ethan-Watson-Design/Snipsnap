@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>2F43FF85-5C7B-4F26-8669-DC306A8E0E95</key>
+		<key>7E5493D1-5D9B-432A-8DB3-5869EE426A4F</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>2F43FF85-5C7B-4F26-8669-DC306A8E0E95.xcactivitylog</string>
+			<string>7E5493D1-5D9B-432A-8DB3-5869EE426A4F.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -32,21 +32,21 @@
 				<integer>25</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
-			<string>Snipsnap project</string>
+			<string>Grabbit project</string>
 			<key>schemeIdentifier-schemeName</key>
-			<string>Snipsnap</string>
+			<string>Grabbit</string>
 			<key>schemeIdentifier-sharedScheme</key>
 			<integer>1</integer>
 			<key>signature</key>
-			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<string>Building project Grabbit with scheme Grabbit and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>807303556.12369299</real>
+			<real>807329065.25504506</real>
 			<key>timeStoppedRecording</key>
-			<real>807303561.06141496</real>
+			<real>807329084.29486406</real>
 			<key>title</key>
-			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<string>Building project Grabbit with scheme Grabbit and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>2F43FF85-5C7B-4F26-8669-DC306A8E0E95</string>
+			<string>7E5493D1-5D9B-432A-8DB3-5869EE426A4F</string>
 		</dict>
 		<key>D74C29F7-0560-40B1-9A66-6D6136725F2F</key>
 		<dict>

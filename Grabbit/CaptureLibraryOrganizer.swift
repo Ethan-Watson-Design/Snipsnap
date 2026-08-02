@@ -11,10 +11,27 @@ struct CaptureLocationSnapshot: Equatable {
 }
 
 enum CaptureLibraryOrganizer {
-    /// Active project folders under the Settings save location — folders that still
-    /// contain at least one capture in the library (matches sidebar Group by Project).
+    /// Project folders under the Settings save location — on-disk children of the
+    /// destination root (including empty folders), plus any capture parent folders.
     static func existingProjectNames() -> [String] {
         var names = Set<String>()
+        let root = AppSettings.destinationFolderURL
+        let fileManager = FileManager.default
+
+        if let children = try? fileManager.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        ) {
+            for url in children {
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+                guard isDirectory else { continue }
+                let name = CaptureTag.normalizeName(url.lastPathComponent)
+                guard !name.isEmpty else { continue }
+                names.insert(name)
+            }
+        }
+
         let history = CaptureHistory.shared
         for entry in history.entriesInSaveRoot {
             guard !history.isAtRootCapture(id: entry.id),
@@ -25,6 +42,7 @@ enum CaptureLibraryOrganizer {
             guard !name.isEmpty else { continue }
             names.insert(name)
         }
+
         return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 

@@ -1,0 +1,240 @@
+{
+  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/KitchenSinkView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Appearance",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 85
+        }
+      },
+      {
+        "comment": "",
+        "key": "Preview light and dark appearance",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 93
+        }
+      },
+      {
+        "comment": "",
+        "key": "Kitchen Sink",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 75
+        }
+      },
+      {
+        "comment": "",
+        "key": "Design tokens and reusable UI building blocks.",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 78
+        }
+      },
+      {
+        "comment": "",
+        "key": "Semantics",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 101
+        }
+      },
+      {
+        "comment": "",
+        "key": "Palette primitives · 100 → 1000",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 122
+        }
+      },
+      {
+        "comment": "",
+        "key": "Annotation palette (solid 600)",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 133
+        }
+      },
+      {
+        "comment": "",
+        "key": "Recording gradients",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 147
+        }
+      },
+      {
+        "comment": "",
+        "key": "Snap Area",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 217
+        }
+      },
+      {
+        "comment": "",
+        "key": "Action bar",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 278
+        }
+      },
+      {
+        "comment": "",
+        "key": "Toolbar pill (screenshot tools)",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 283
+        }
+      },
+      {
+        "comment": "",
+        "key": "Demo toggle",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 301
+        }
+      },
+      {
+        "comment": "",
+        "key": "Capture mode",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 304
+        }
+      },
+      {
+        "comment": "",
+        "key": "Region",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 305
+        }
+      },
+      {
+        "comment": "",
+        "key": "Window",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 306
+        }
+      },
+      {
+        "comment": "",
+        "key": "Display",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 307
+        }
+      },
+      {
+        "comment": "",
+        "key": "Secondary",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 313
+        }
+      },
+      {
+        "comment": "",
+        "key": "Prominent",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 315
+        }
+      },
+      {
+        "comment": "",
+        "key": "Compact",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 317
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-tagging…",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 340
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 323
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 331
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show message toast",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 351
+        }
+      },
+      {
+        "comment": "",
+        "key": "Show action toast",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 356
+        }
+      },
+      {
+        "comment": "",
+        "key": "600",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 404
+        }
+      },
+      {
+        "comment": "",
+        "key": "The quick brown fox",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 446
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %@",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 440
+        }
+      },
+      {
+        "comment": "",
+        "key": "%@ · %lld",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 467
+        }
+      },
+      {
+        "comment": "",
+        "key": "%lld pt",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 482
+        }
+      }
+    ]
+  },
+  "version": 1
+}

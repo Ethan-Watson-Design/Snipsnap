@@ -1,0 +1,30 @@
+{
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/GrabbitApp.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GrabbitApp.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GrabbitApp.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GrabbitApp.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GrabbitApp.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GrabbitApp.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/KitchenSinkView.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/KitchenSinkView.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/KitchenSinkView.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/KitchenSinkView.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/KitchenSinkView.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/KitchenSinkView.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/RabbitHopLoader.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RabbitHopLoader.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RabbitHopLoader.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RabbitHopLoader.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RabbitHopLoader.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RabbitHopLoader.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/RecordingBackgroundPreviewWindow.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.swiftdeps"
+  }
+}

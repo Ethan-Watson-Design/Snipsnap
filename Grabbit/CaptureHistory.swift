@@ -492,8 +492,10 @@ final class CaptureHistory {
 
         let stored = storedCaptures[storedIndex]
         let oldURL = URL(fileURLWithPath: stored.path).standardizedFileURL
+        let oldParent = oldURL.deletingLastPathComponent().standardizedFileURL
+        let destination = directory.standardizedFileURL
         let newURL = CaptureNaming.uniqueURL(
-            in: directory,
+            in: destination,
             preferredFilename: oldURL.lastPathComponent,
             excluding: oldURL
         ).standardizedFileURL
@@ -536,6 +538,10 @@ final class CaptureHistory {
             )
         }
 
+        if oldParent != destination {
+            Self.removeEmptyDirectoriesIfNeeded(startingAt: oldParent)
+        }
+
         persist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
         return newURL
@@ -544,13 +550,50 @@ final class CaptureHistory {
     func remove(id: UUID) {
         guard let index = storedCaptures.firstIndex(where: { $0.id == id }) else { return }
         let stored = storedCaptures[index]
+        let oldParent = URL(fileURLWithPath: stored.path)
+            .deletingLastPathComponent()
+            .standardizedFileURL
         trashStoredFiles(for: stored)
+        Self.removeEmptyDirectoriesIfNeeded(startingAt: oldParent)
 
         storedCaptures.remove(at: index)
         entries.removeAll { $0.id == id }
         fullImageCache.removeObject(forKey: id as NSUUID)
         persist()
         NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+    }
+
+    /// Removes emptied project/subfolders under the save root after a capture leaves.
+    /// Never deletes the destination root itself.
+    private static func removeEmptyDirectoriesIfNeeded(startingAt directory: URL) {
+        let root = AppSettings.destinationFolderURL.standardizedFileURL
+        var current = directory.standardizedFileURL
+        let fileManager = FileManager.default
+
+        while current != root, isURL(current, under: root) {
+            guard isEffectivelyEmptyDirectory(current) else { return }
+            let parent = current.deletingLastPathComponent().standardizedFileURL
+            try? fileManager.removeItem(at: current)
+            current = parent
+        }
+    }
+
+    /// True when the directory has no real contents (ignores `.DS_Store`).
+    private static func isEffectivelyEmptyDirectory(_ directory: URL) -> Bool {
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: directory.path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return false
+        }
+        guard let contents = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) else {
+            return false
+        }
+        return contents.allSatisfy { $0.lastPathComponent == ".DS_Store" }
     }
 
     // MARK: - Tags

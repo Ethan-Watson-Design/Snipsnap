@@ -1,0 +1,128 @@
+{
+  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/CaptureTagBar.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Add tag",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 155
+        }
+      },
+      {
+        "comment": "",
+        "key": "No tags",
+        "location": {
+          "startingColumn": 26,
+          "startingLine": 58
+        }
+      },
+      {
+        "comment": "",
+        "key": "Remove %@ tag",
+        "location": {
+          "startingColumn": 19,
+          "startingLine": 121
+        }
+      },
+      {
+        "comment": "",
+        "key": "Kind",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 160
+        }
+      },
+      {
+        "comment": "",
+        "key": "Project folder",
+        "location": {
+          "startingColumn": 47,
+          "startingLine": 169
+        }
+      },
+      {
+        "comment": "",
+        "key": "Tag name",
+        "location": {
+          "startingColumn": 66,
+          "startingLine": 169
+        }
+      },
+      {
+        "comment": "",
+        "key": "Move",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 176
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add",
+        "location": {
+          "startingColumn": 53,
+          "startingLine": 176
+        }
+      },
+      {
+        "comment": "",
+        "key": "Set project and move this capture into that folder",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 183
+        }
+      },
+      {
+        "comment": "",
+        "key": "Add tag",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 184
+        }
+      },
+      {
+        "comment": "",
+        "key": "Suggesting",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 355
+        }
+      },
+      {
+        "comment": "",
+        "key": "Name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 360
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit suggested name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 395
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose project folder",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 519
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose %@",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 520
+        }
+      }
+    ]
+  },
+  "version": 1
+}

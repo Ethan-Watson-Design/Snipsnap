@@ -1,0 +1,23 @@
+{
+  "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/ZoomEffect.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomEffect.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomEffect.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomEffect.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomEffect.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomEffect.swiftdeps"
+  },
+  "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/ZoomablePlayerView.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomablePlayerView.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomablePlayerView.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomablePlayerView.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomablePlayerView.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Grabbit/.build/Build/Intermediates.noindex/Grabbit.build/Debug/Grabbit.build/Objects-normal/arm64/ZoomablePlayerView.swiftdeps"
+  }
+}

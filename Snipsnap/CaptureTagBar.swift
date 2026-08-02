@@ -257,6 +257,8 @@ struct SoftControlDropdown<MenuContent: View>: View {
     var leadingLabel: String? = nil
     let title: String
     var help: String? = nil
+    var primaryForeground: Color = DesignTokens.Color.textPrimary.swiftUI
+    var secondaryForeground: Color = DesignTokens.Color.textSecondary.swiftUI
     @ViewBuilder var menuContent: () -> MenuContent
 
     @State private var isHovered = false
@@ -268,10 +270,10 @@ struct SoftControlDropdown<MenuContent: View>: View {
                 HStack(spacing: 6) {
                     if let leadingLabel {
                         Text(leadingLabel)
-                            .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                            .foregroundStyle(secondaryForeground)
                     }
                     Text(title)
-                        .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                        .foregroundStyle(primaryForeground)
                 }
                 .font(.snipsnap(.caption))
                 .padding(.leading, 10)
@@ -280,7 +282,7 @@ struct SoftControlDropdown<MenuContent: View>: View {
 
                 SoftControlDropdownChrome.divider()
 
-                SoftControlDropdownChrome.chevron(height: 22)
+                SoftControlDropdownChrome.chevron(height: 22, color: secondaryForeground)
             }
             .contentShape(Rectangle())
             .background {
@@ -327,10 +329,13 @@ enum SoftControlDropdownChrome {
             .padding(.vertical, 1)
     }
 
-    static func chevron(height: CGFloat) -> some View {
+    static func chevron(
+        height: CGFloat,
+        color: Color = DesignTokens.Color.textSecondary.swiftUI
+    ) -> some View {
         Image(systemName: "chevron.down")
             .font(.system(size: 9, weight: .semibold))
-            .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+            .foregroundStyle(color)
             .frame(width: 28, height: height)
             .contentShape(Rectangle())
     }

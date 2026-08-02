@@ -161,15 +161,15 @@ enum DesignTokens {
         /// Nested / control surface.
         static let surface = dynamicNeutral(.t100, .t900)
         /// Raised content surface (cards, fields, dropdown panels).
-        static let surfaceElevated = dynamicNeutral(.t100, .t900)
+        static let surfaceElevated = dynamicNeutral(.t100, .t1000)
         /// Floating / elevated panel surface (toast, annotation chrome).
         static let panelSurface = dynamicNeutral(.t100, .t900)
         /// Selected list / nav / chip fill.
-        static let listSelectionFill = dynamicNeutral(.t400, .t800)
+        static let listSelectionFill = dynamicNeutral(.t500, .t900)
         /// Soft bordered control fill (Group by, Auto-Tag, project/flow dropdowns).
-        static let softControlFill = dynamicNeutral(.t100, .t900)
+        static let softControlFill = dynamicNeutral(.t100, .t1000)
         /// Hover / pressed variant of `softControlFill`.
-        static let softControlFillHovered = dynamicNeutral(.t200, .t800)
+        static let softControlFillHovered = dynamicNeutral(.t200, .t900)
         /// Hover fill on dark HUD chrome (Capture Bar mode buttons).
         static let panelHoverFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.10))
         /// Active fill on dark HUD chrome.
@@ -179,7 +179,7 @@ enum DesignTokens {
 
         static let border = dynamicNeutral(.t300, .t700)
         /// Soft control outline (Group by, Auto-Tag, project/flow dropdowns) — one step darker than `border`.
-        static let softControlBorder = dynamicNeutral(.t400, .t800)
+        static let softControlBorder = dynamicNeutral(.t400, .t900)
         /// Dividers on `panelSurface`.
         static let borderOnPanel = dynamicNeutralAlpha(
             light: Palette.neutral[.t1000].ns.withAlphaComponent(0.12),
@@ -190,9 +190,12 @@ enum DesignTokens {
 
         // MARK: Text
 
-        static let textPrimary = dynamicNeutral(.t1000, .t100)
-        static let textSecondary = dynamicNeutral(.t600, .t400)
-        static let textTertiary = dynamicNeutral(.t500, .t500)
+        static let textPrimary = dynamicNeutral(.t1000, .t200)
+        static let textSecondary = dynamicNeutral(.t600, .t500)
+        static let textTertiary = dynamicNeutral(.t500, .t600)
+        /// Capture Library sidebar labels / icons — one step darker than body text in dark mode.
+        static let sidebarTextPrimary = dynamicNeutral(.t1000, .t300)
+        static let sidebarTextSecondary = dynamicNeutral(.t600, .t600)
         /// Icons and labels on `primary` surfaces.
         static let textOnPrimary = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.92))
 

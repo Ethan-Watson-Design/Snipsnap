@@ -9,6 +9,29 @@ import AppKit
 import SwiftUI
 
 struct KitchenSinkView: View {
+    private enum AppearanceOverride: String, CaseIterable, Identifiable {
+        case system, light, dark
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .system: return "System"
+            case .light: return "Light"
+            case .dark: return "Dark"
+            }
+        }
+
+        var colorScheme: ColorScheme? {
+            switch self {
+            case .system: return nil
+            case .light: return .light
+            case .dark: return .dark
+            }
+        }
+    }
+
+    @State private var appearanceOverride: AppearanceOverride = .system
     @State private var selectedSwatch: RecordingBackgroundStyle = .warm
     @State private var selectedPaletteIndex = 0
     @State private var sampleTags: [CaptureTag] = [
@@ -40,18 +63,34 @@ struct KitchenSinkView: View {
             .padding(DesignTokens.Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(DesignTokens.Color.background.swiftUI)
+        .preferredColorScheme(appearanceOverride.colorScheme)
     }
 
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            Text("Kitchen Sink")
-                .font(.snipsnap(.panelTitle))
-                .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
-            Text("Design tokens and reusable UI building blocks.")
-                .font(.snipsnap(.body))
-                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+        HStack(alignment: .top, spacing: DesignTokens.Spacing.lg) {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+                Text("Kitchen Sink")
+                    .font(.snipsnap(.panelTitle))
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                Text("Design tokens and reusable UI building blocks.")
+                    .font(.snipsnap(.body))
+                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+            }
+
+            Spacer(minLength: DesignTokens.Spacing.md)
+
+            Picker("Appearance", selection: $appearanceOverride) {
+                ForEach(AppearanceOverride.allCases) { mode in
+                    Text(mode.title).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 240)
+            .help("Preview light and dark appearance")
         }
     }
 

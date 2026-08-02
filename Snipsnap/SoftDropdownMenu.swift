@@ -221,6 +221,9 @@ private struct SoftDropdownPanelBridge<Content: View>: NSViewRepresentable {
         private var hostingView: NSHostingView<AnyView>?
         private var localMonitor: Any?
         private var globalMonitor: Any?
+        private var lastPresentedSize: NSSize = .zero
+        /// Coalesces deferred measure/present work off the SwiftUI update/layout pass.
+        private var pendingPresent = false
 
         init(isPresented: Binding<Bool>) {
             presentedBinding = isPresented
@@ -254,30 +257,55 @@ private struct SoftDropdownPanelBridge<Content: View>: NSViewRepresentable {
                 self.panel = panel
             }
 
-            let hosting: NSHostingView<AnyView>
             if let hostingView {
                 hostingView.rootView = rootContent
-                hosting = hostingView
             } else {
                 let created = NSHostingView(rootView: rootContent)
                 created.sizingOptions = [.intrinsicContentSize]
                 hostingView = created
                 panel?.contentView = created
-                hosting = created
             }
+
+            // Never call layoutSubtreeIfNeeded during updateNSView — AppKit may already
+            // be mid-layout. Defer measure + orderFront to the next runloop turn.
+            guard !pendingPresent else { return }
+            pendingPresent = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.pendingPresent = false
+                self.measureAndPresent()
+            }
+        }
+
+        private func measureAndPresent() {
+            guard presentedBinding.wrappedValue else { return }
+            guard let hosting = hostingView, let panel else { return }
+            guard anchorView?.window != nil else { return }
 
             hosting.layoutSubtreeIfNeeded()
             var size = hosting.fittingSize
             size.width = max(size.width, 180)
             size.height = max(size.height, 40)
+
+            let alreadyVisible = panel.isVisible
+            let sizeUnchanged = size.equalTo(lastPresentedSize)
+            if alreadyVisible && sizeUnchanged {
+                positionPanel(size: size)
+                installMonitorsIfNeeded()
+                return
+            }
+
             hosting.frame = NSRect(origin: .zero, size: size)
-            panel?.setContentSize(size)
+            panel.setContentSize(size)
+            lastPresentedSize = size
             positionPanel(size: size)
-            panel?.orderFront(nil)
+            panel.orderFront(nil)
             installMonitorsIfNeeded()
         }
 
         func dismiss() {
+            pendingPresent = false
+            lastPresentedSize = .zero
             removeMonitors()
             panel?.orderOut(nil)
         }
@@ -289,8 +317,10 @@ private struct SoftDropdownPanelBridge<Content: View>: NSViewRepresentable {
             let anchorOnScreen = window.convertToScreen(anchorInWindow)
             let gap: CGFloat = 4
 
+            // Right-align the panel to the anchor so wider menus grow leftward
+            // from the trailing edge of the control (chevron side).
             var origin = NSPoint(
-                x: anchorOnScreen.minX,
+                x: anchorOnScreen.maxX - size.width,
                 y: anchorOnScreen.minY - size.height - gap
             )
 
@@ -299,11 +329,11 @@ private struct SoftDropdownPanelBridge<Content: View>: NSViewRepresentable {
                 if origin.y < visible.minY {
                     origin.y = anchorOnScreen.maxY + gap
                 }
-                if origin.x + size.width > visible.maxX {
-                    origin.x = visible.maxX - size.width - 4
-                }
                 if origin.x < visible.minX {
                     origin.x = visible.minX + 4
+                }
+                if origin.x + size.width > visible.maxX {
+                    origin.x = visible.maxX - size.width - 4
                 }
             }
 

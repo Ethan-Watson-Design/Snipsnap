@@ -27,6 +27,7 @@ struct RabbitIcon: View {
 }
 
 /// Loops hop frames in place, sheet order right→left: crouch → launch → mid → descend → land.
+/// When `isAnimating` is false, the same view shows the static mid-leap glyph (no view swap/fade).
 struct RabbitHopLoader: View {
     enum Size {
         /// Larger stand-alone / kitchen-sink demo size.
@@ -46,6 +47,10 @@ struct RabbitHopLoader: View {
     }
 
     var size: Size = .button
+    /// When false, shows `MenuBarIcon` in the same image pipeline (idle Auto-Tag label).
+    var isAnimating: Bool = true
+    /// Optional size override for animating between idle icon and loader bounds.
+    var pointSizeOverride: CGSize? = nil
 
     /// Base tick for weighted hop timing (seconds).
     private static let tick: TimeInterval = 0.10
@@ -68,19 +73,27 @@ struct RabbitHopLoader: View {
         1.2, // land
     ]
 
+    private var resolvedSize: CGSize {
+        pointSizeOverride ?? size.pointSize
+    }
+
     var body: some View {
-        let pointSize = size.pointSize
-        TimelineView(.animation(minimumInterval: Self.tick, paused: false)) { context in
-            let index = hopFrameIndex(at: context.date)
-            Image(Self.frameNames[index])
+        let pointSize = resolvedSize
+        TimelineView(.animation(minimumInterval: Self.tick, paused: !isAnimating)) { context in
+            let name = isAnimating
+                ? Self.frameNames[hopFrameIndex(at: context.date)]
+                : "MenuBarIcon"
+            Image(name)
                 .renderingMode(.template)
                 .interpolation(.none)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: pointSize.width, height: pointSize.height)
+                // Asset name changes must not crossfade when sliding idle → hop.
+                .contentTransition(.identity)
         }
         .frame(width: pointSize.width, height: pointSize.height)
-        .accessibilityLabel("Auto-tagging")
+        .accessibilityLabel(isAnimating ? "Auto-tagging" : "Auto-Tag")
     }
 
     private func hopFrameIndex(at date: Date) -> Int {

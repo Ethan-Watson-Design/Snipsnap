@@ -32,6 +32,9 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
     private var hostingView: NSHostingView<CaptureLibraryView>?
     /// Coalesce titlebar paint so we never mutate chrome mid-layout (AppKit layout-loop crash).
     private var titlebarFillPending = false
+    /// System spacing between close → miniaturize / close → zoom, captured once
+    /// so repositioning during drag never depends on mid-reset frames.
+    private var trafficLightSpacingX: (miniaturize: CGFloat, zoom: CGFloat)?
 
     static func show() {
         DispatchQueue.main.async {
@@ -43,9 +46,9 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             current?.center()
             current?.makeKeyAndOrderFront(nil)
             // Titlebar materials finish installing after the first layout pass.
+            // Defer layoutSubtreeIfNeeded — sync force overlaps AppKit's own layout
+            // from makeKeyAndOrderFront and triggers layout-recursion warnings.
             current?.scheduleTitlebarFill()
-            current?.contentView?.needsLayout = true
-            current?.contentView?.layoutSubtreeIfNeeded()
             DispatchQueue.main.async {
                 current?.contentView?.needsLayout = true
                 current?.contentView?.layoutSubtreeIfNeeded()
@@ -101,7 +104,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             }
         )
         if let hostingView {
-            // Update in place so List scroll position and @State selection survive.
+            // Update in place so sidebar scroll position and @State selection survive.
             hostingView.rootView = view
             layoutLibraryContent(hostingView)
             scheduleTitlebarFill()
@@ -169,6 +172,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
     /// Equal top + left inset for the traffic-light cluster, chosen so the
     /// lights share a vertical center with the header row (which keeps the
     /// uniform `windowEdgeInset` content margin on all four sides).
+    /// Safe to call during layout — only adjusts button frames.
     private func layoutTrafficLights() {
         guard let close = standardWindowButton(.closeButton),
               let miniaturize = standardWindowButton(.miniaturizeButton),
@@ -185,13 +189,39 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             ? lightInset
             : container.bounds.height - height - lightInset
 
-        // Keep system spacing between the three buttons; only shift the group.
-        let miniaturizeOffsetX = miniaturize.frame.minX - close.frame.minX
-        let zoomOffsetX = zoom.frame.minX - close.frame.minX
+        // Capture system spacing once (before we move the cluster). AppKit resets
+        // button frames to default insets while dragging — re-reading offsets then
+        // is fine, but caching avoids any mid-reset oddities.
+        let spacing = trafficLightSpacingX ?? {
+            let captured = (
+                miniaturize: miniaturize.frame.minX - close.frame.minX,
+                zoom: zoom.frame.minX - close.frame.minX
+            )
+            trafficLightSpacingX = captured
+            return captured
+        }()
 
-        close.setFrameOrigin(NSPoint(x: lightInset, y: y))
-        miniaturize.setFrameOrigin(NSPoint(x: lightInset + miniaturizeOffsetX, y: y))
-        zoom.setFrameOrigin(NSPoint(x: lightInset + zoomOffsetX, y: y))
+        let closeOrigin = NSPoint(x: lightInset, y: y)
+        let miniOrigin = NSPoint(x: lightInset + spacing.miniaturize, y: y)
+        let zoomOrigin = NSPoint(x: lightInset + spacing.zoom, y: y)
+
+        // Skip no-op writes so we don’t dirty AppKit mid-drag.
+        if !close.frame.origin.equalTo(closeOrigin) {
+            close.setFrameOrigin(closeOrigin)
+        }
+        if !miniaturize.frame.origin.equalTo(miniOrigin) {
+            miniaturize.setFrameOrigin(miniOrigin)
+        }
+        if !zoom.frame.origin.equalTo(zoomOrigin) {
+            zoom.setFrameOrigin(zoomOrigin)
+        }
+    }
+
+    /// Re-pin traffic lights after AppKit’s own titlebar layout (which resets them
+    /// to system edge insets). Frame-only — never hide materials here.
+    override func layoutIfNeeded() {
+        super.layoutIfNeeded()
+        layoutTrafficLights()
     }
 
     private func hideVisualEffects(in view: NSView, depth: Int) {
@@ -234,7 +264,13 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
 
     func windowDidResize(_ notification: Notification) {
         contentView?.needsLayout = true
+        layoutTrafficLights()
         scheduleTitlebarFill()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        // AppKit re-lays out titlebar buttons to default insets while dragging.
+        layoutTrafficLights()
     }
 }
 
@@ -431,15 +467,95 @@ private enum CaptureLibrarySidebarMetrics {
     static let resizeHandleWidth: CGFloat = 7
     static let resizeRuleWidth: CGFloat = 1
     static let resizeRuleHoverWidth: CGFloat = 3
-    /// Inset for the rounded hover/selection pill so it doesn’t bleed to the list edges.
-    static let rowBackgroundInset: CGFloat = DesignTokens.Spacing.sm
-    /// Matches `CaptureLibraryChrome.windowEdgeInset` at the window’s left edge.
-    static let rowLeading: CGFloat = CaptureLibraryChrome.windowEdgeInset
+    /// Leading inset for Group by + list; trailing list gutter holds the scroller.
+    static let contentInset: CGFloat = CaptureLibraryChrome.windowEdgeInset
+    /// Trailing strip between row content and the vertical divider (scroller lives here).
+    static let scrollbarGutter: CGFloat = contentInset
+    /// Overlay knob width — sits in `scrollbarGutter`, not over row labels.
+    static let scrollbarWidth: CGFloat = 5
+    /// Inset inside the selection pill so labels aren’t flush to its edges.
+    static let rowContentInset: CGFloat = DesignTokens.Spacing.sm
     static let disclosureWidth: CGFloat = 10
     static let groupIconSpacing: CGFloat = 6
     /// Nested capture names align with group header names (disclosure sits left of names).
     static var nestedRowLeading: CGFloat {
-        rowLeading + disclosureWidth + groupIconSpacing
+        disclosureWidth + groupIconSpacing
+    }
+}
+
+/// Narrow overlay scroller for the Capture Library sidebar gutter.
+private final class CaptureLibrarySidebarScroller: NSScroller {
+    override class func scrollerWidth(
+        for controlSize: NSControl.ControlSize,
+        scrollerStyle: NSScroller.Style
+    ) -> CGFloat {
+        CaptureLibrarySidebarMetrics.scrollbarWidth
+    }
+}
+
+/// Zeros `NSScrollView` content insets and installs a narrow gutter scroller.
+/// Content clears the trailing gutter via SwiftUI padding (not `contentInsets`, which
+/// would also inset the scroller away from the divider).
+private struct CaptureLibraryScrollInsetZeroer: NSViewRepresentable {
+    func makeNSView(context: Context) -> CaptureLibraryScrollInsetZeroerView {
+        CaptureLibraryScrollInsetZeroerView()
+    }
+
+    func updateNSView(_ nsView: CaptureLibraryScrollInsetZeroerView, context: Context) {
+        // Defer — updateNSView can run during an active layout pass.
+        DispatchQueue.main.async { [weak nsView] in
+            nsView?.configureScrollChrome()
+        }
+    }
+}
+
+private final class CaptureLibraryScrollInsetZeroerView: NSView {
+    override var isHidden: Bool {
+        get { true }
+        set {}
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Configure off the layout pass — mutating NSScrollView insets/scroller
+        // from layout() re-enters AppKit layout and can trigger recursion warnings.
+        DispatchQueue.main.async { [weak self] in self?.configureScrollChrome() }
+    }
+
+    func configureScrollChrome() {
+        var current: NSView? = superview
+        while let view = current {
+            if let scroll = view as? NSScrollView ?? view.enclosingScrollView {
+                if scroll.automaticallyAdjustsContentInsets {
+                    scroll.automaticallyAdjustsContentInsets = false
+                }
+                let zero = NSEdgeInsets()
+                if scroll.contentInsets.left != 0 || scroll.contentInsets.right != 0
+                    || scroll.contentInsets.top != 0 || scroll.contentInsets.bottom != 0 {
+                    scroll.contentInsets = zero
+                }
+                if scroll.contentView.contentInsets.left != 0
+                    || scroll.contentView.contentInsets.right != 0 {
+                    scroll.contentView.contentInsets = zero
+                }
+                if scroll.scrollerInsets.left != 0 || scroll.scrollerInsets.right != 0
+                    || scroll.scrollerInsets.top != 0 || scroll.scrollerInsets.bottom != 0 {
+                    scroll.scrollerInsets = zero
+                }
+                scroll.scrollerStyle = .overlay
+                scroll.hasVerticalScroller = true
+                scroll.autohidesScrollers = true
+                if !(scroll.verticalScroller is CaptureLibrarySidebarScroller) {
+                    let scroller = CaptureLibrarySidebarScroller()
+                    scroller.controlSize = .mini
+                    scroll.verticalScroller = scroller
+                } else {
+                    scroll.verticalScroller?.controlSize = .mini
+                }
+                return
+            }
+            current = view.superview
+        }
     }
 }
 
@@ -459,38 +575,6 @@ private enum CaptureLibraryChrome {
     /// Clears the header / traffic-light band so sidebar chrome sits below it.
     static let belowTrafficLightsTop: CGFloat =
         windowEdgeInset + headerControlHeight + DesignTokens.Spacing.sm
-}
-
-/// Turns off AppKit’s full-bleed `NSTableView` selection so only our inset pill shows.
-private struct CaptureLibraryListSelectionSuppressor: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        view.isHidden = true
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            var current: NSView? = nsView.superview
-            while let view = current {
-                if let table = Self.firstTableView(in: view) {
-                    if table.selectionHighlightStyle != .none {
-                        table.selectionHighlightStyle = .none
-                    }
-                    return
-                }
-                current = view.superview
-            }
-        }
-    }
-
-    private static func firstTableView(in root: NSView) -> NSTableView? {
-        if let table = root as? NSTableView { return table }
-        for subview in root.subviews {
-            if let table = firstTableView(in: subview) { return table }
-        }
-        return nil
-    }
 }
 
 /// Transparent hit target that resizes the sidebar from absolute window mouse X.
@@ -638,7 +722,7 @@ private struct CaptureLibraryView: View {
     /// Groups start collapsed; membership means the section is expanded.
     @State private var expandedGroupIDs = Set<String>()
     /// Manual double-click detection so rename does not use TapGesture(count: 2),
-    /// which can swallow the first click and leave List selection unchanged.
+    /// which can swallow the first click and leave selection unchanged.
     @State private var lastRowClick: (id: UUID, date: Date)?
 
     @State private var hoveredCaptureID: UUID?
@@ -725,13 +809,12 @@ private struct CaptureLibraryView: View {
             detailColumn
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(DesignTokens.Color.background.swiftUI)
-                // Isolate detail geometry so sidebar width changes don't
-                // interpolate/jitter child text layout.
-                .geometryGroup()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(DesignTokens.Color.background.swiftUI)
-        // Keep resize instantaneous — inherited animations make the title jitter.
+        // Sidebar width must never interpolate — preview/detail follow the
+        // divider immediately (geometryGroup + inherited springs were lagging).
+        .animation(nil, value: sidebarWidth)
         .transaction { transaction in
             if isSidebarResizing {
                 transaction.animation = nil
@@ -792,10 +875,33 @@ private struct CaptureLibraryView: View {
             let deselected = oldSelection.subtracting(newSelection)
             dismissOrganizedConfirmation(for: deselected)
         }
-        .onChange(of: entries.count) { _, _ in
-            selection = selection.filter { id in entries.contains(where: { $0.id == id }) }
-            if selection.isEmpty, let first = entries.first {
-                selection = [first.id]
+        .onChange(of: entries.map(\.id)) { oldIDs, newIDs in
+            let newIDSet = Set(newIDs)
+            let remaining = selection.intersection(newIDSet)
+            if !remaining.isEmpty {
+                if remaining.count != selection.count {
+                    selection = remaining
+                }
+                ensureSelectionVisible()
+                return
+            }
+
+            // Active item was removed — stay on the next row down (or up if last).
+            if let anchor = oldIDs.first(where: { selection.contains($0) }),
+               let oldIndex = oldIDs.firstIndex(of: anchor) {
+                if oldIndex + 1 < oldIDs.count, newIDSet.contains(oldIDs[oldIndex + 1]) {
+                    selection = [oldIDs[oldIndex + 1]]
+                } else if oldIndex > 0, newIDSet.contains(oldIDs[oldIndex - 1]) {
+                    selection = [oldIDs[oldIndex - 1]]
+                } else if let first = newIDs.first {
+                    selection = [first]
+                } else {
+                    selection = []
+                }
+            } else if selection.isEmpty, let first = newIDs.first {
+                selection = [first]
+            } else {
+                selection = []
             }
             ensureSelectionVisible()
         }
@@ -812,7 +918,11 @@ private struct CaptureLibraryView: View {
                         ? CaptureLibrarySidebarMetrics.resizeRuleHoverWidth
                         : CaptureLibrarySidebarMetrics.resizeRuleWidth
                 )
-                .animation(.easeInOut(duration: 0.12), value: isActive)
+                // Hover thicken only — never animate while the column is moving.
+                .animation(
+                    isSidebarResizing ? nil : .easeInOut(duration: 0.12),
+                    value: isActive
+                )
             // AppKit tracks window-space mouse X so the divider stays glued to the
             // cursor; SwiftUI DragGesture drifts as the handle's frame moves.
             CaptureLibrarySidebarResizeHandle(
@@ -820,11 +930,23 @@ private struct CaptureLibraryView: View {
                 minWidth: CaptureLibrarySidebarMetrics.minColumnWidth,
                 maxWidth: CaptureLibrarySidebarMetrics.maxColumnWidth,
                 onHoverChange: { isSidebarResizeHandleHovered = $0 },
-                onDragBegan: { isSidebarResizing = true },
+                onDragBegan: {
+                    var transaction = Transaction()
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isSidebarResizing = true
+                    }
+                },
                 onWidthChange: { setSidebarWidth($0, persist: false) },
                 onDragEnded: {
                     setSidebarWidth(clampedSidebarWidth, persist: true)
-                    isSidebarResizing = false
+                    var transaction = Transaction()
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                    withTransaction(transaction) {
+                        isSidebarResizing = false
+                    }
                 }
             )
         }
@@ -853,9 +975,10 @@ private struct CaptureLibraryView: View {
             } else {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                     groupByPicker
-                        .padding(.horizontal, CaptureLibrarySidebarMetrics.rowLeading)
                         .padding(.top, CaptureLibraryChrome.belowTrafficLightsTop)
                         .padding(.bottom, DesignTokens.Spacing.xs)
+                        // Match list content: trailing gutter is for the scroller only.
+                        .padding(.trailing, CaptureLibrarySidebarMetrics.scrollbarGutter)
 
                     GeometryReader { geo in
                         captureList
@@ -864,6 +987,9 @@ private struct CaptureLibraryView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                // Leading content inset only — scroll view reaches the divider so the
+                // narrow scroller can sit in the trailing gutter, not over row labels.
+                .padding(.leading, CaptureLibrarySidebarMetrics.contentInset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
@@ -876,7 +1002,9 @@ private struct CaptureLibraryView: View {
         SoftControlDropdown(
             leadingLabel: "Group by",
             title: groupBy.menuLabel,
-            help: "Group captures in the sidebar"
+            help: "Group captures in the sidebar",
+            primaryForeground: DesignTokens.Color.sidebarTextPrimary.swiftUI,
+            secondaryForeground: DesignTokens.Color.sidebarTextSecondary.swiftUI
         ) {
             ForEach(CaptureLibraryGroupBy.allCases) { option in
                 SoftDropdownRow(
@@ -892,27 +1020,35 @@ private struct CaptureLibraryView: View {
 
     @ViewBuilder
     private var captureList: some View {
-        List(selection: $selection) {
-            switch groupBy {
-            case .project:
-                groupedCaptureSections(projectGroups)
-            case .flow:
-                groupedCaptureSections(flowGroups)
-            case .none:
-                ForEach(visibleEntries) { entry in
-                    captureListRow(for: entry)
-                        .onAppear {
-                            loadMoreIfNeeded(entry)
-                        }
+        // ScrollView (not List). Leading gutter is on the column; trailing
+        // `scrollbarGutter` padding clears row content so the narrow overlay
+        // scroller sits against the divider instead of on labels.
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                switch groupBy {
+                case .project:
+                    groupedCaptureSections(projectGroups)
+                case .flow:
+                    groupedCaptureSections(flowGroups)
+                case .none:
+                    ForEach(visibleEntries) { entry in
+                        captureListRow(for: entry)
+                            .onAppear {
+                                loadMoreIfNeeded(entry)
+                            }
+                    }
                 }
             }
+            .padding(.trailing, CaptureLibrarySidebarMetrics.scrollbarGutter)
+            .padding(.bottom, CaptureLibraryChrome.windowEdgeInset)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .contentMargins(.horizontal, 0, for: .scrollContent)
-        .contentMargins(.bottom, CaptureLibraryChrome.windowEdgeInset, for: .scrollContent)
+        .contentMargins(.horizontal, 0, for: .scrollIndicators)
+        .contentMargins(.horizontal, 0)
+        .scrollContentBackground(.hidden)
         .background(DesignTokens.Color.background.swiftUI)
-        .background(CaptureLibraryListSelectionSuppressor())
+        .background(CaptureLibraryScrollInsetZeroer())
     }
 
     @ViewBuilder
@@ -921,15 +1057,7 @@ private struct CaptureLibraryView: View {
     ) -> some View {
         ForEach(groups) { group in
             namedGroupHeader(for: group)
-                .selectionDisabled()
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listRowInsets(EdgeInsets(
-                    top: DesignTokens.Spacing.xs,
-                    leading: CaptureLibrarySidebarMetrics.rowLeading,
-                    bottom: DesignTokens.Spacing.xs,
-                    trailing: CaptureLibrarySidebarMetrics.rowLeading
-                ))
+                .padding(.vertical, DesignTokens.Spacing.xs)
 
             if expandedGroupIDs.contains(group.id) {
                 ForEach(group.entries) { entry in
@@ -949,12 +1077,12 @@ private struct CaptureLibraryView: View {
             HStack(spacing: CaptureLibrarySidebarMetrics.groupIconSpacing) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                    .foregroundStyle(DesignTokens.Color.sidebarTextSecondary.swiftUI)
                     .frame(width: CaptureLibrarySidebarMetrics.disclosureWidth, alignment: .center)
 
                 Text(group.name)
                     .font(.snipsnap(.caption))
-                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                    .foregroundStyle(DesignTokens.Color.sidebarTextPrimary.swiftUI)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1089,26 +1217,25 @@ private struct CaptureLibraryView: View {
                 .pointerStyle(.link)
             }
         }
-        .tag(entry.id)
-        .listRowBackground(
+        // Column has the leading gutter. Flat rows need rowContentInset on both sides
+        // inside the selection pill; nested rows keep disclosure indent on leading.
+        // Trailing list gutter (scrollbar) is on the LazyVStack, not here.
+        .padding(
+            .leading,
+            nested
+                ? CaptureLibrarySidebarMetrics.nestedRowLeading
+                : CaptureLibrarySidebarMetrics.rowContentInset
+        )
+        .padding(.trailing, CaptureLibrarySidebarMetrics.rowContentInset)
+        .padding(.vertical, DesignTokens.Spacing.xs)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
             listRowBackground(
                 isSelected: selection.contains(entry.id),
                 isHovered: hoveredCaptureID == entry.id
             )
         )
-        .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets(
-            top: DesignTokens.Spacing.xs,
-            // Nested names share the group-name column (disclosure + type icon sit left of names).
-            leading: nested
-                ? CaptureLibrarySidebarMetrics.nestedRowLeading
-                : CaptureLibrarySidebarMetrics.rowLeading,
-            bottom: DesignTokens.Spacing.xs,
-            trailing: CaptureLibrarySidebarMetrics.rowLeading
-        ))
-        // Custom light selection fill — keep labels dark instead of List's white-on-accent tint.
-        .environment(\.backgroundProminence, .standard)
-        .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+        .foregroundStyle(DesignTokens.Color.sidebarTextPrimary.swiftUI)
         .onHover { hovering in
             if hovering {
                 hoveredCaptureID = entry.id
@@ -1163,18 +1290,11 @@ private struct CaptureLibraryView: View {
     }
 
     private func listRowBackground(isSelected: Bool, isHovered: Bool) -> some View {
-        // Same view type always — swapping Clear ↔ Shape on select
-        // can nudge List layout/scroll during selection changes.
-        // Opaque window fill first so AppKit’s full-bleed selection never shows through.
         let fillOpacity: CGFloat = isSelected ? 1 : (isHovered ? 0.55 : 0)
-        return ZStack {
-            DesignTokens.Color.background.swiftUI
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(fillOpacity))
-                .padding(.horizontal, CaptureLibrarySidebarMetrics.rowBackgroundInset)
-                // 0.5pt each side → 1pt gap between adjacent row backgrounds.
-                .padding(.vertical, 0.5)
-        }
+        return RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
+            .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(fillOpacity))
+            // 0.5pt each side → 1pt gap between adjacent row backgrounds.
+            .padding(.vertical, 0.5)
     }
 
     private var createProjectAlertBinding: Binding<Bool> {
@@ -1296,8 +1416,32 @@ private struct CaptureLibraryView: View {
     }
 
     private func moveToTrash(_ entry: CaptureEntry) {
+        // Prefer the next row down before history reloads; otherwise
+        // the entries onChange falls back to the latest capture.
+        if selection.contains(entry.id) {
+            if let nextID = selectionNeighbor(afterRemoving: entry.id) {
+                selection = [nextID]
+            } else {
+                selection = []
+            }
+        }
+        if renameTarget?.id == entry.id {
+            renameTarget = nil
+        }
         CaptureHistory.shared.remove(id: entry.id)
         sessionState.rowStates.removeValue(forKey: entry.id)
+    }
+
+    /// Sidebar neighbor after deleting `id`: one down, or one up if it was last.
+    private func selectionNeighbor(afterRemoving id: UUID) -> UUID? {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return nil }
+        if index + 1 < entries.count {
+            return entries[index + 1].id
+        }
+        if index > 0 {
+            return entries[index - 1].id
+        }
+        return nil
     }
 
     private func updateRowState(_ id: UUID, _ transform: (inout CaptureRowSuggestionState) -> Void) {
@@ -1433,7 +1577,7 @@ private struct InlineRenameTextField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = NSFont.snipsnap(.caption)
-        field.textColor = DesignTokens.Color.textPrimary.ns
+        field.textColor = DesignTokens.Color.sidebarTextPrimary.ns
         field.placeholderString = "Name"
         field.delegate = context.coordinator
         field.target = context.coordinator
@@ -1554,7 +1698,7 @@ private struct CaptureSidebarRow: View {
         } else {
             Text(entry.displayName)
                 .font(.snipsnap(.caption))
-                .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                .foregroundStyle(DesignTokens.Color.sidebarTextPrimary.swiftUI)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -1568,11 +1712,11 @@ private struct CaptureSidebarRow: View {
             HStack(spacing: 4) {
                 Text("Organized")
                     .font(.snipsnap(.caption))
-                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                    .foregroundStyle(DesignTokens.Color.sidebarTextPrimary.swiftUI)
                 Button(action: onRevertSuggestion) {
                     Image(systemName: "arrow.uturn.backward")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                        .foregroundStyle(DesignTokens.Color.sidebarTextSecondary.swiftUI)
                 }
                 .buttonStyle(.plain)
                 .pointerStyle(.link)
@@ -1581,7 +1725,7 @@ private struct CaptureSidebarRow: View {
         } else {
             Text(entry.createdAt.compactRelativeLabel)
                 .font(.snipsnap(.caption))
-                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                .foregroundStyle(DesignTokens.Color.sidebarTextSecondary.swiftUI)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
@@ -1600,20 +1744,38 @@ private enum CaptureLibraryProject {
 
 /// Idle Auto-Tag label (rabbit + text), or centered hop loader while requesting.
 /// Loader is overlaid so its taller frame can't grow the button and nudge the preview.
+/// One rabbit view slides from the leading icon slot into the center — no crossfade.
 private struct AutoTagButtonLabel: View {
     let isLoading: Bool
 
+    private static let spacing: CGFloat = 6
+    private static let idleSize = CGSize(width: 18, height: 18 * 12 / 25)
+    private static let loadingSize = RabbitHopLoader.Size.compact.pointSize
+
     var body: some View {
-        HStack(spacing: 6) {
-            RabbitIcon(width: 18)
+        HStack(spacing: Self.spacing) {
+            Color.clear
+                .frame(width: Self.idleSize.width, height: Self.idleSize.height)
             Text("Auto-Tag")
+                .opacity(isLoading ? 0 : 1)
+                // Label drops out instantly; only the rabbit motion should read.
+                .animation(nil, value: isLoading)
         }
-        .opacity(isLoading ? 0 : 1)
         .overlay {
-            if isLoading {
-                RabbitHopLoader(size: .compact)
+            GeometryReader { geo in
+                let rabbitSize = isLoading ? Self.loadingSize : Self.idleSize
+                let x = isLoading ? (geo.size.width - rabbitSize.width) / 2 : 0
+                let y = (geo.size.height - rabbitSize.height) / 2
+
+                RabbitHopLoader(
+                    size: .compact,
+                    isAnimating: isLoading,
+                    pointSizeOverride: rabbitSize
+                )
+                .offset(x: x, y: y)
             }
         }
+        .animation(.easeInOut(duration: 0.28), value: isLoading)
     }
 }
 
@@ -1997,10 +2159,20 @@ private struct CapturePreviewPane: View {
             .padding(.trailing, CaptureLibraryChrome.windowEdgeInset)
             .padding(.top, CaptureLibraryChrome.topChromeInset)
             .padding(.bottom, DesignTokens.Spacing.md)
+            // Keep suggestion motion on the header only — animating the whole
+            // pane made the preview interpolate when the sidebar was resized.
+            .animation(suggestionInsertAnimation, value: showsSuggestionRow)
+            .animation(.easeInOut(duration: 0.2), value: rowState.isLoading)
+            // Isolate header text layout from detail width changes.
+            .geometryGroup()
 
             previewContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .padding(.horizontal, CaptureLibraryChrome.windowEdgeInset)
+                .transaction { transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
 
             actionFooter
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -2009,8 +2181,6 @@ private struct CapturePreviewPane: View {
                 .padding(.vertical, CaptureLibraryChrome.windowEdgeInset)
         }
         .background(DesignTokens.Color.background.swiftUI)
-        .animation(suggestionInsertAnimation, value: showsSuggestionRow)
-        .animation(.easeInOut(duration: 0.2), value: rowState.isLoading)
         .onAppear {
             syncSuggestionPhaseFromRowState()
             loadPreviewIfNeeded()

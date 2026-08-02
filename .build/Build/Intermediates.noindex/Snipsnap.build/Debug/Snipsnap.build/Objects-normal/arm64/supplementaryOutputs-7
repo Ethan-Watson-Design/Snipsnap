@@ -1,23 +1,23 @@
 {
-  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/ToastView.swift" : {
-    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ToastView.swiftconstvalues",
-    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ToastView.d",
-    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ToastView.dia",
-    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ToastView.o",
-    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ToastView.swiftdeps"
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/ShipItPanel.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ShipItPanel.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ShipItPanel.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ShipItPanel.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ShipItPanel.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/ShipItPanel.swiftdeps"
   },
-  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/VideoAnnotationWindow.swift" : {
-    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/VideoAnnotationWindow.swiftconstvalues",
-    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/VideoAnnotationWindow.d",
-    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/VideoAnnotationWindow.dia",
-    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/VideoAnnotationWindow.o",
-    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/VideoAnnotationWindow.swiftdeps"
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/SideBySideLayout.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SideBySideLayout.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SideBySideLayout.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SideBySideLayout.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SideBySideLayout.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SideBySideLayout.swiftdeps"
   },
-  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/WindowSelector.swift" : {
-    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/WindowSelector.swiftconstvalues",
-    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/WindowSelector.d",
-    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/WindowSelector.dia",
-    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/WindowSelector.o",
-    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/WindowSelector.swiftdeps"
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/SnipsnapApp.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SnipsnapApp.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SnipsnapApp.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SnipsnapApp.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SnipsnapApp.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/SnipsnapApp.swiftdeps"
   }
 }

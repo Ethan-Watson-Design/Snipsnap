@@ -37,6 +37,11 @@ final class RegionSelector {
         }
     }
 
+    /// Whether an interactive region overlay is currently on screen.
+    static var isInteractiveVisible: Bool {
+        activeView?.mode == .interactive && overlayWindow?.isVisible == true
+    }
+
     static func hide() {
         overlayWindow?.close()
         overlayWindow = nil
@@ -55,12 +60,15 @@ final class RegionSelector {
         let window = RegionSelectorWindow(contentRect: screenRect, level: level)
         let view = RegionSelectorView(frame: NSRect(origin: .zero, size: screenRect.size))
         view.mode = mode
+
+        // Attach before applying initialRect — setSelection needs the view's window
+        // to convert screen coordinates.
+        window.contentView = view
         if let initialRect {
             view.setSelection(fromScreenRect: initialRect)
         }
         configure(view)
 
-        window.contentView = view
         window.makeFirstResponder(view)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)

@@ -14,7 +14,6 @@ struct KitchenSinkView: View {
     @State private var sampleTags: [CaptureTag] = [
         CaptureTag(kind: .project, name: "Snipsnap"),
         CaptureTag(kind: .flow, name: "Annotate"),
-        CaptureTag(kind: .component, name: "CaptureBar"),
         CaptureTag(kind: .custom, name: "WIP"),
     ]
     @State private var demoToggle = true
@@ -60,6 +59,10 @@ struct KitchenSinkView: View {
 
     private var colorsSection: some View {
         KitchenSinkSection(title: "Colors") {
+            Text("Semantics")
+                .font(.snipsnap(.label))
+                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 88), spacing: DesignTokens.Spacing.sm)], spacing: DesignTokens.Spacing.sm) {
                 colorSwatch("Background", DesignTokens.Color.background.swiftUI)
                 colorSwatch("Surface", DesignTokens.Color.surface.swiftUI)
@@ -70,9 +73,14 @@ struct KitchenSinkView: View {
                 colorSwatch("Panel", DesignTokens.Color.panelSurface.swiftUI)
                 colorSwatch("Selection", DesignTokens.Color.listSelectionFill.swiftUI)
                 colorSwatch("Region", DesignTokens.Color.regionSelectionAccent.swiftUI)
+                colorSwatch("Text Primary", DesignTokens.Color.textPrimary.swiftUI)
+                colorSwatch("Text Secondary", DesignTokens.Color.textSecondary.swiftUI)
+                colorSwatch("Text Tertiary", DesignTokens.Color.textTertiary.swiftUI)
+                colorSwatch("Soft Control", DesignTokens.Color.softControlFill.swiftUI)
+                colorSwatch("Soft Hover", DesignTokens.Color.softControlFillHovered.swiftUI)
             }
 
-            Text("Palette scales · 100 → 1000")
+            Text("Palette primitives · 100 → 1000")
                 .font(.snipsnap(.label))
                 .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
                 .padding(.top, DesignTokens.Spacing.sm)
@@ -223,10 +231,10 @@ struct KitchenSinkView: View {
         }
     }
 
-    // MARK: - Annotation chrome
+    // MARK: - Annotation tools
 
     private var annotationChromeSection: some View {
-        KitchenSinkSection(title: "Annotation Chrome") {
+        KitchenSinkSection(title: "Annotation Tools") {
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.lg) {
                 Text("Action bar")
                     .font(.snipsnap(.label))
@@ -269,8 +277,28 @@ struct KitchenSinkView: View {
                         .buttonStyle(.snipsnapProminent)
                     Button("Compact") {}
                         .buttonStyle(.snipsnapCompact)
-                    ProgressView()
-                        .controlSize(.small)
+                    Button {
+                    } label: {
+                        HStack(spacing: 6) {
+                            RabbitIcon(width: 18)
+                            Text("Auto-Tag")
+                        }
+                    }
+                    .buttonStyle(.snipsnap)
+                    Button {
+                    } label: {
+                        HStack(spacing: 6) {
+                            RabbitIcon(width: 18)
+                            Text("Auto-Tag")
+                        }
+                        .opacity(0)
+                        .overlay {
+                            RabbitHopLoader(size: .compact)
+                        }
+                    }
+                    .buttonStyle(.snipsnap)
+                    .allowsHitTesting(false)
+                    .help("Auto-tagging…")
                 }
             }
         }
@@ -373,8 +401,9 @@ struct KitchenSinkView: View {
                 Text("\(Self.formatTypeSize(token.size)) · \(token.typefaceLabel)")
                     .font(DesignTokens.Typography.monoSwiftUI(size: DesignTokens.Typography.caption.size))
                     .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                    .lineLimit(1)
             }
-            .frame(width: 168, alignment: .leading)
+            .frame(width: 200, alignment: .leading)
             Text("The quick brown fox")
                 .font(.snipsnap(style))
                 .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)

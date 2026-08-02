@@ -7,7 +7,7 @@
         "key": "Kitchen Sink",
         "location": {
           "startingColumn": 18,
-          "startingLine": 50
+          "startingLine": 49
         }
       },
       {
@@ -15,15 +15,23 @@
         "key": "Design tokens and reusable UI building blocks.",
         "location": {
           "startingColumn": 18,
-          "startingLine": 53
+          "startingLine": 52
         }
       },
       {
         "comment": "",
-        "key": "Palette scales · 100 → 1000",
+        "key": "Semantics",
         "location": {
           "startingColumn": 18,
-          "startingLine": 75
+          "startingLine": 62
+        }
+      },
+      {
+        "comment": "",
+        "key": "Palette primitives · 100 → 1000",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 83
         }
       },
       {
@@ -31,7 +39,7 @@
         "key": "Annotation palette (solid 600)",
         "location": {
           "startingColumn": 18,
-          "startingLine": 86
+          "startingLine": 94
         }
       },
       {
@@ -39,7 +47,7 @@
         "key": "Recording gradients",
         "location": {
           "startingColumn": 18,
-          "startingLine": 100
+          "startingLine": 108
         }
       },
       {
@@ -47,7 +55,7 @@
         "key": "Snap Area",
         "location": {
           "startingColumn": 22,
-          "startingLine": 170
+          "startingLine": 178
         }
       },
       {
@@ -55,7 +63,7 @@
         "key": "Action bar",
         "location": {
           "startingColumn": 22,
-          "startingLine": 231
+          "startingLine": 239
         }
       },
       {
@@ -63,7 +71,7 @@
         "key": "Toolbar pill (screenshot tools)",
         "location": {
           "startingColumn": 22,
-          "startingLine": 236
+          "startingLine": 244
         }
       },
       {
@@ -71,7 +79,7 @@
         "key": "Demo toggle",
         "location": {
           "startingColumn": 24,
-          "startingLine": 254
+          "startingLine": 262
         }
       },
       {
@@ -79,7 +87,7 @@
         "key": "Capture mode",
         "location": {
           "startingColumn": 24,
-          "startingLine": 257
+          "startingLine": 265
         }
       },
       {
@@ -87,7 +95,7 @@
         "key": "Region",
         "location": {
           "startingColumn": 26,
-          "startingLine": 258
+          "startingLine": 266
         }
       },
       {
@@ -95,7 +103,7 @@
         "key": "Window",
         "location": {
           "startingColumn": 26,
-          "startingLine": 259
+          "startingLine": 267
         }
       },
       {
@@ -103,7 +111,7 @@
         "key": "Display",
         "location": {
           "startingColumn": 26,
-          "startingLine": 260
+          "startingLine": 268
         }
       },
       {
@@ -111,7 +119,7 @@
         "key": "Secondary",
         "location": {
           "startingColumn": 28,
-          "startingLine": 266
+          "startingLine": 274
         }
       },
       {
@@ -119,7 +127,7 @@
         "key": "Prominent",
         "location": {
           "startingColumn": 28,
-          "startingLine": 268
+          "startingLine": 276
         }
       },
       {
@@ -127,7 +135,31 @@
         "key": "Compact",
         "location": {
           "startingColumn": 28,
-          "startingLine": 270
+          "startingLine": 278
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-tagging…",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 301
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 34,
+          "startingLine": 284
+        }
+      },
+      {
+        "comment": "",
+        "key": "Auto-Tag",
+        "location": {
+          "startingColumn": 38,
+          "startingLine": 293
         }
       },
       {
@@ -135,7 +167,7 @@
         "key": "Show message toast",
         "location": {
           "startingColumn": 24,
-          "startingLine": 284
+          "startingLine": 312
         }
       },
       {
@@ -143,7 +175,7 @@
         "key": "Show action toast",
         "location": {
           "startingColumn": 24,
-          "startingLine": 289
+          "startingLine": 317
         }
       },
       {
@@ -151,7 +183,7 @@
         "key": "600",
         "location": {
           "startingColumn": 38,
-          "startingLine": 337
+          "startingLine": 365
         }
       },
       {
@@ -159,7 +191,7 @@
         "key": "The quick brown fox",
         "location": {
           "startingColumn": 18,
-          "startingLine": 378
+          "startingLine": 407
         }
       },
       {
@@ -167,7 +199,7 @@
         "key": "%@ · %@",
         "location": {
           "startingColumn": 22,
-          "startingLine": 373
+          "startingLine": 401
         }
       },
       {
@@ -175,7 +207,7 @@
         "key": "%@ · %lld",
         "location": {
           "startingColumn": 18,
-          "startingLine": 399
+          "startingLine": 428
         }
       },
       {
@@ -183,7 +215,7 @@
         "key": "%lld pt",
         "location": {
           "startingColumn": 18,
-          "startingLine": 414
+          "startingLine": 443
         }
       }
     ]

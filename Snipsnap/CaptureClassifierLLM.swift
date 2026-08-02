@@ -11,26 +11,26 @@ import FoundationModels
 
 @Generable
 private struct LLMRenameAndProjectResult {
-    @Guide(description: "Short descriptive filename without extension, suitable for a screenshot or recording")
+    @Guide(description: """
+        Short descriptive filename without extension. Prefer the active workspace, \
+        site, product, or browser/app tab name from the top chrome — not page titles \
+        (Design, Parts, Settings), breadcrumbs, or selected tree/list items. Expand \
+        compound product names into readable Title Case \
+        (e.g. Handwerkercenter → Handwerk Center).
+        """)
     var suggestedName: String
 
-    @Guide(description: "Project or folder name to organize this capture under. Empty when unclear.")
+    @Guide(description: """
+        Project or folder name for organizing this capture. Prefer matching an \
+        existing project name when one fits. Use the product, codebase, client, or \
+        brand identity — NOT in-app breadcrumbs, page paths \
+        (e.g. Extension to North-West › High Performance), or view titles. \
+        Empty when unclear.
+        """)
     var suggestedProject: String
 
     @Guide(description: "Optional product flow or screen name (e.g. Checkout, Onboarding, Settings). Empty when unclear.")
     var suggestedFlow: String
-
-    @Guide(description: "Comma-separated UI component types visible in the capture. Use short UI primitives only (Button, Tab, Data Grid, Modal, Text Field, Navigation Bar, Sidebar, Card, Toast, Form, Dropdown, Table, List, Chart). Never use project names, screen names, or feature names. Empty when unclear. Max 6.")
-    var suggestedComponents: String
-
-    @Guide(description: "Confidence from 0 to 1")
-    var confidence: Double
-}
-
-@Generable
-private struct LLMProjectResult {
-    @Guide(description: "Project or folder name to organize this capture under. Empty when unclear.")
-    var suggestedProject: String
 
     @Guide(description: "Confidence from 0 to 1")
     var confidence: Double
@@ -49,22 +49,23 @@ enum CaptureClassifierLLM {
     static func suggestRenameAndProject(
         image: NSImage,
         windowInfo: WindowSignature?,
-        ocrText: String
+        ocrText: String,
+        existingProjects: [String] = []
     ) async -> RenameSuggestion? {
         guard isAvailable else { return nil }
 
         let session = LanguageModelSession(
             instructions: """
             You help organize screenshots and screen recordings on macOS for a design annotation app.
-            Suggest:
-            1) A concise filename (no extension)
-            2) An optional project/folder name (the product or codebase)
-            3) An optional flow name (user journey or screen group, e.g. Checkout, Onboarding)
-            4) UI component tags — only reusable UI primitives visible in the capture \
-            (Button, Tab, Data Grid, Modal, Text Field, Navigation Bar, Sidebar, Card, Toast, Form, Dropdown, Table, List, Chart, Toggle, Badge).
-            Components must be UI building blocks, not projects, screens, flows, or feature names.
-            Prefer the shortest standard component name (e.g. "Button" not "Primary CTA Button", "Modal" not "Delete Confirmation Modal").
-            Leave fields empty when unclear. Components should be a comma-separated list of at most 6 items.
+            Read UI chrome carefully, in top-to-bottom order:
+            1) Filename — active tab / workspace / product name in the top bar. \
+            Expand glued compound words into Title Case. Do not use page headings, \
+            breadcrumbs, sidebar labels, or selected list rows as the filename.
+            2) Project — the product, brand, client, or codebase this capture belongs to. \
+            Prefer an existing project name when one clearly matches. Do not use \
+            breadcrumbs or in-page navigation paths as the project.
+            3) Flow — optional screen or journey label (Parts, Design, Checkout). Empty when unclear.
+            Leave fields empty when unclear. Do not invent UI component tags.
             """
         )
 
@@ -74,7 +75,7 @@ enum CaptureClassifierLLM {
                     image: image,
                     windowInfo: windowInfo,
                     ocrText: ocrText,
-                    mode: .renameAndProject
+                    existingProjects: existingProjects
                 )
             }
 
@@ -82,14 +83,12 @@ enum CaptureClassifierLLM {
             let project = sanitized(result.suggestedProject)
             let name = sanitized(result.suggestedName)
             let flow = sanitized(result.suggestedFlow)
-            let components = parseComponents(result.suggestedComponents)
-            guard name != nil || project != nil || flow != nil || !components.isEmpty else { return nil }
+            guard name != nil || project != nil || flow != nil else { return nil }
 
             return RenameSuggestion(
                 suggestedName: name,
                 suggestedProject: project,
                 suggestedFlow: flow,
-                suggestedComponents: components,
                 confidence: min(max(result.confidence, 0), 1)
             )
         } catch {
@@ -97,100 +96,42 @@ enum CaptureClassifierLLM {
         }
     }
 
-    static func suggestProject(
-        image: NSImage,
-        windowInfo: WindowSignature?,
-        ocrText: String
-    ) async -> String? {
-        guard isAvailable else { return nil }
-
-        let session = LanguageModelSession(
-            instructions: """
-            You help sort screenshots and recordings into project folders on macOS.
-            Return only a project/folder name when you are reasonably confident.
-            """
-        )
-
-        do {
-            let response = try await session.respond(generating: LLMProjectResult.self) {
-                promptText(
-                    image: image,
-                    windowInfo: windowInfo,
-                    ocrText: ocrText,
-                    mode: .projectOnly
-                )
-            }
-            return sanitized(response.content.suggestedProject)
-        } catch {
-            return nil
-        }
-    }
-
     // MARK: - Prompt helpers
-
-    private enum PromptMode {
-        case renameAndProject
-        case projectOnly
-    }
 
     private static func promptText(
         image: NSImage,
         windowInfo: WindowSignature?,
         ocrText: String,
-        mode: PromptMode
+        existingProjects: [String]
     ) -> String {
-        var lines: [String] = []
-        switch mode {
-        case .renameAndProject:
-            lines.append(
-                "A screenshot is attached (described below via OCR). " +
-                "Suggest a short descriptive filename, a project folder name, " +
-                "an optional flow name, and UI component types " +
-                "(Button, Tab, Data Grid, Modal, etc. — not project or screen names)."
-            )
-        case .projectOnly:
-            lines.append(
-                "A screenshot is attached (described below via OCR). " +
-                "Suggest a project folder name for organizing this capture."
-            )
-        }
-
-        lines.append("Image size: \(Int(image.size.width))×\(Int(image.size.height)) px")
+        var lines: [String] = [
+            "OCR from the screenshot is listed top→bottom (UI chrome first). " +
+            "Suggest a short descriptive filename, a project folder name, " +
+            "and an optional flow name.",
+            "Image size: \(Int(image.size.width))×\(Int(image.size.height)) px"
+        ]
 
         if let windowTitle = windowInfo?.windowTitle, !windowTitle.isEmpty {
             lines.append("Window title: \(windowTitle)")
         }
         if let project = windowInfo?.resolvedProjectName, !project.isEmpty {
-            lines.append("Resolved project: \(project)")
+            lines.append("Resolved project signal: \(project)")
+        }
+        if let app = windowInfo?.dominantAppName ?? windowInfo?.bundleID, !app.isEmpty {
+            lines.append("Captured app: \(app)")
+        }
+        if !existingProjects.isEmpty {
+            lines.append(
+                "Existing project folders (prefer matching one when appropriate): " +
+                existingProjects.prefix(40).joined(separator: ", ")
+            )
         }
         if !ocrText.isEmpty {
-            lines.append("OCR text from screenshot:\n\(ocrText.prefix(2_000))")
+            lines.append("OCR text (top → bottom):\n\(ocrText.prefix(2_500))")
         } else {
             lines.append("OCR text: (none detected)")
         }
         return lines.joined(separator: "\n")
-    }
-
-    private static func parseComponents(_ raw: String) -> [String] {
-        raw
-            .split(separator: ",")
-            .compactMap { sanitized(String($0)).map(canonicalizeComponent) }
-            .reduce(into: [String]()) { result, name in
-                guard !result.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }) else { return }
-                result.append(name)
-            }
-            .prefix(6)
-            .map { $0 }
-    }
-
-    /// Prefer canonical vocabulary casing when the model returns a known UI component.
-    private static func canonicalizeComponent(_ name: String) -> String {
-        if let known = CaptureUIComponentVocabulary.common.first(where: {
-            $0.caseInsensitiveCompare(name) == .orderedSame
-        }) {
-            return known
-        }
-        return name
     }
 
     private static func sanitized(_ raw: String?) -> String? {

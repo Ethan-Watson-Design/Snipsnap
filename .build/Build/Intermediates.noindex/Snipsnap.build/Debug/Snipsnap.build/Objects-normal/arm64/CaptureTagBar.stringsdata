@@ -7,7 +7,7 @@
         "key": "Add tag",
         "location": {
           "startingColumn": 15,
-          "startingLine": 109
+          "startingLine": 155
         }
       },
       {
@@ -15,23 +15,15 @@
         "key": "No tags",
         "location": {
           "startingColumn": 26,
-          "startingLine": 44
-        }
-      },
-      {
-        "comment": "",
-        "key": "Remove project and move file back to save folder",
-        "location": {
-          "startingColumn": 23,
-          "startingLine": 76
+          "startingLine": 58
         }
       },
       {
         "comment": "",
         "key": "Remove %@ tag",
         "location": {
-          "startingColumn": 23,
-          "startingLine": 77
+          "startingColumn": 19,
+          "startingLine": 121
         }
       },
       {
@@ -39,7 +31,7 @@
         "key": "Kind",
         "location": {
           "startingColumn": 20,
-          "startingLine": 114
+          "startingLine": 160
         }
       },
       {
@@ -47,7 +39,7 @@
         "key": "Project folder",
         "location": {
           "startingColumn": 47,
-          "startingLine": 123
+          "startingLine": 169
         }
       },
       {
@@ -55,7 +47,7 @@
         "key": "Tag name",
         "location": {
           "startingColumn": 66,
-          "startingLine": 123
+          "startingLine": 169
         }
       },
       {
@@ -63,7 +55,7 @@
         "key": "Move",
         "location": {
           "startingColumn": 44,
-          "startingLine": 130
+          "startingLine": 176
         }
       },
       {
@@ -71,7 +63,7 @@
         "key": "Add",
         "location": {
           "startingColumn": 53,
-          "startingLine": 130
+          "startingLine": 176
         }
       },
       {
@@ -79,7 +71,7 @@
         "key": "Set project and move this capture into that folder",
         "location": {
           "startingColumn": 23,
-          "startingLine": 137
+          "startingLine": 183
         }
       },
       {
@@ -87,7 +79,63 @@
         "key": "Add tag",
         "location": {
           "startingColumn": 23,
-          "startingLine": 138
+          "startingLine": 184
+        }
+      },
+      {
+        "comment": "",
+        "key": "Edit suggested name",
+        "location": {
+          "startingColumn": 15,
+          "startingLine": 407
+        }
+      },
+      {
+        "comment": "",
+        "key": "Suggested:",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 352
+        }
+      },
+      {
+        "comment": "",
+        "key": "Name",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 357
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose project folder",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 509
+        }
+      },
+      {
+        "comment": "",
+        "key": "Choose %@",
+        "location": {
+          "startingColumn": 27,
+          "startingLine": 510
+        }
+      },
+      {
+        "comment": "",
+        "key": "None",
+        "location": {
+          "startingColumn": 32,
+          "startingLine": 492
+        }
+      },
+      {
+        "comment": "",
+        "key": "Custom…",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 497
         }
       }
     ]

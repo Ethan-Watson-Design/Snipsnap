@@ -1,23 +1,23 @@
 {
-  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/DesignTokens.swift" : {
-    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/DesignTokens.swiftconstvalues",
-    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/DesignTokens.d",
-    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/DesignTokens.dia",
-    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/DesignTokens.o",
-    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/DesignTokens.swiftdeps"
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/CaptureLibraryWindow.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureLibraryWindow.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureLibraryWindow.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureLibraryWindow.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureLibraryWindow.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureLibraryWindow.swiftdeps"
   },
-  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/OrganizePreviewSheet.swift" : {
-    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/OrganizePreviewSheet.swiftconstvalues",
-    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/OrganizePreviewSheet.d",
-    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/OrganizePreviewSheet.dia",
-    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/OrganizePreviewSheet.o",
-    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/OrganizePreviewSheet.swiftdeps"
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/CaptureTagBar.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTagBar.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTagBar.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTagBar.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTagBar.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTagBar.swiftdeps"
   },
-  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/RecordingBackgroundPreviewWindow.swift" : {
-    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.swiftconstvalues",
-    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.d",
-    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.dia",
-    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.o",
-    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/RecordingBackgroundPreviewWindow.swiftdeps"
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/CaptureTags.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTags.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTags.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTags.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTags.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureTags.swiftdeps"
   }
 }

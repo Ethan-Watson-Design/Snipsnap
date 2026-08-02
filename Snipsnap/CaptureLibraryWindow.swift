@@ -6,7 +6,6 @@
 import SwiftUI
 import Combine
 @preconcurrency import AppKit
-import AVKit
 
 enum AppDockPresentation {
     static var isLibraryPresented: Bool {
@@ -31,6 +30,8 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
     private nonisolated(unsafe) var historyObserver: NSObjectProtocol?
     fileprivate let sessionState = CaptureLibrarySessionState()
     private var hostingView: NSHostingView<CaptureLibraryView>?
+    /// Coalesce titlebar paint so we never mutate chrome mid-layout (AppKit layout-loop crash).
+    private var titlebarFillPending = false
 
     static func show() {
         DispatchQueue.main.async {
@@ -41,10 +42,13 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             current?.reloadContent()
             current?.center()
             current?.makeKeyAndOrderFront(nil)
-            current?.applyTitlebarFill()
-            // Toolbar / titlebar materials finish installing after the first layout pass.
+            // Titlebar materials finish installing after the first layout pass.
+            current?.scheduleTitlebarFill()
+            current?.contentView?.needsLayout = true
+            current?.contentView?.layoutSubtreeIfNeeded()
             DispatchQueue.main.async {
-                current?.applyTitlebarFill()
+                current?.contentView?.needsLayout = true
+                current?.contentView?.layoutSubtreeIfNeeded()
             }
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -59,9 +63,8 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         )
         title = "Snipsnap"
         titleVisibility = .hidden
-        toolbarStyle = .unifiedCompact
-        // Let window.backgroundColor show through the titlebar + toolbar chrome
-        // (SwiftUI .toolbarBackground does not reliably tint AppKit-hosted toolbars).
+        // Compact chrome: traffic lights only — preview header hugs the window top.
+        toolbar = nil
         styleMask.insert(.fullSizeContentView)
         titlebarAppearsTransparent = true
         titlebarSeparatorStyle = .none
@@ -101,7 +104,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
             // Update in place so List scroll position and @State selection survive.
             hostingView.rootView = view
             layoutLibraryContent(hostingView)
-            applyTitlebarFill()
+            scheduleTitlebarFill()
             return
         }
         let hostingView = NSHostingView(rootView: view)
@@ -109,7 +112,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         hostingView.sizingOptions = []
         self.hostingView = hostingView
         layoutLibraryContent(hostingView)
-        applyTitlebarFill()
+        scheduleTitlebarFill()
     }
 
     private func layoutLibraryContent(_ hostingView: NSView) {
@@ -125,25 +128,31 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         contentView = container
     }
 
-    override func layoutIfNeeded() {
-        super.layoutIfNeeded()
-        (contentView as? CaptureLibraryContentContainer)?.layoutHostingView(in: self)
-        applyTitlebarFill()
+    /// Defer chrome mutations until after the current layout pass settles.
+    fileprivate func scheduleTitlebarFill() {
+        guard !titlebarFillPending else { return }
+        titlebarFillPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.titlebarFillPending = false
+            self.applyTitlebarFill()
+        }
     }
 
-    /// Solid fill behind traffic lights / title / toolbar items; kill vibrancy that stays white.
-    fileprivate func applyTitlebarFill() {
+    /// Kill titlebar vibrancy so it doesn’t flash white; keep chrome clear so
+    /// SwiftUI headers can draw through and hug the top (Cursor-style).
+    /// Must not run during AppKit layout — hiding titlebar materials invalidates layout.
+    private func applyTitlebarFill() {
         let fill = DesignTokens.Color.background.ns
         backgroundColor = fill
-        toolbar?.showsBaselineSeparator = false
         contentView?.wantsLayer = true
         contentView?.layer?.backgroundColor = fill.cgColor
 
         guard let closeButton = standardWindowButton(.closeButton),
               let titlebar = closeButton.superview else { return }
 
-        // Titlebar view + container + any toolbar chrome often use NSVisualEffectView
-        // materials that stay system-white unless removed.
+        // Titlebar view + container often use NSVisualEffectView materials that
+        // stay system-white unless removed. Keep layers clear so content shows.
         var roots: [NSView] = [titlebar]
         if let container = titlebar.superview {
             roots.append(container)
@@ -151,15 +160,48 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         for root in roots {
             hideVisualEffects(in: root, depth: 0)
             root.wantsLayer = true
-            root.layer?.backgroundColor = fill.cgColor
+            root.layer?.backgroundColor = NSColor.clear.cgColor
         }
+
+        layoutTrafficLights()
+    }
+
+    /// Equal top + left inset for the traffic-light cluster, chosen so the
+    /// lights share a vertical center with the header row (which keeps the
+    /// uniform `windowEdgeInset` content margin on all four sides).
+    private func layoutTrafficLights() {
+        guard let close = standardWindowButton(.closeButton),
+              let miniaturize = standardWindowButton(.miniaturizeButton),
+              let zoom = standardWindowButton(.zoomButton),
+              let container = close.superview else { return }
+
+        let height = close.frame.height
+        // Header row: `windowEdgeInset` top padding + `headerControlHeight` controls.
+        let headerCenterFromTop = CaptureLibraryChrome.windowEdgeInset
+            + CaptureLibraryChrome.headerControlHeight / 2
+        // Same value for top and left so the cluster isn’t skewed in the corner.
+        let lightInset = max(0, headerCenterFromTop - height / 2)
+        let y = container.isFlipped
+            ? lightInset
+            : container.bounds.height - height - lightInset
+
+        // Keep system spacing between the three buttons; only shift the group.
+        let miniaturizeOffsetX = miniaturize.frame.minX - close.frame.minX
+        let zoomOffsetX = zoom.frame.minX - close.frame.minX
+
+        close.setFrameOrigin(NSPoint(x: lightInset, y: y))
+        miniaturize.setFrameOrigin(NSPoint(x: lightInset + miniaturizeOffsetX, y: y))
+        zoom.setFrameOrigin(NSPoint(x: lightInset + zoomOffsetX, y: y))
     }
 
     private func hideVisualEffects(in view: NSView, depth: Int) {
         guard depth < 5 else { return }
         if let effect = view as? NSVisualEffectView {
-            effect.isHidden = true
-            effect.alphaValue = 0
+            // Safe here because applyTitlebarFill is always deferred off the layout pass.
+            if !effect.isHidden || effect.alphaValue != 0 {
+                effect.isHidden = true
+                effect.alphaValue = 0
+            }
         }
         for subview in view.subviews {
             hideVisualEffects(in: subview, depth: depth + 1)
@@ -171,7 +213,11 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
         case .screenshot:
             guard let image = CaptureHistory.shared.fullImage(for: entry.id) else { return }
             AnnotationWindow.show(image: image, fileName: entry.displayName, captureID: entry.id)
-        case .recording(let url, let thumbnail):
+        case .recording(_, let thumbnail):
+            // Prefer the manifest path so rename/move can't leave annotate on a stale URL.
+            let url = CaptureHistory.shared.fileURL(for: entry.id)
+                ?? CaptureHistory.shared.storedFileURL(for: entry.id)
+            guard let url else { return }
             VideoAnnotationWindow.show(url: url, thumbnail: thumbnail)
         }
     }
@@ -183,36 +229,101 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        applyTitlebarFill()
+        scheduleTitlebarFill()
     }
 
     func windowDidResize(_ notification: Notification) {
-        applyTitlebarFill()
+        contentView?.needsLayout = true
+        scheduleTitlebarFill()
     }
 }
 
-/// Hosts SwiftUI below the titlebar/toolbar when using `fullSizeContentView`.
+/// Hosts SwiftUI edge-to-edge under a transparent titlebar (`fullSizeContentView`).
 private final class CaptureLibraryContentContainer: NSView {
     private var hostingView: NSView?
+    private var outsideClickMonitor: Any?
 
     func setHostingView(_ view: NSView) {
+        guard hostingView !== view else {
+            needsLayout = true
+            return
+        }
         hostingView?.removeFromSuperview()
         hostingView = view
+        view.translatesAutoresizingMaskIntoConstraints = true
+        // Manual frames only — autoresizing can shift/clip the first paint.
+        view.autoresizingMask = []
         addSubview(view)
         needsLayout = true
     }
 
-    func layoutHostingView(in window: NSWindow) {
+    func layoutHostingView() {
         guard let hostingView else { return }
-        let safeRect = convert(window.contentLayoutRect, from: nil)
-        hostingView.frame = safeRect
-        hostingView.autoresizingMask = [.width, .height]
+        let frame = bounds.integral
+        guard !frame.isNull, !frame.isEmpty else { return }
+        // Setting an identical frame still dirties layout on some AppKit builds.
+        guard !hostingView.frame.equalTo(frame) else { return }
+        hostingView.frame = frame
     }
 
     override func layout() {
         super.layout()
-        guard let window else { return }
-        layoutHostingView(in: window)
+        layoutHostingView()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        removeOutsideClickMonitor()
+        guard window != nil else { return }
+        // SwiftUI TextFields keep the field editor until something else becomes first
+        // responder — clear editing when the click lands outside any text input.
+        outsideClickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            self?.resignTextFocusIfClickOutside(event)
+            return event
+        }
+    }
+
+    deinit {
+        removeOutsideClickMonitor()
+    }
+
+    private func removeOutsideClickMonitor() {
+        if let outsideClickMonitor {
+            NSEvent.removeMonitor(outsideClickMonitor)
+            self.outsideClickMonitor = nil
+        }
+    }
+
+    private func resignTextFocusIfClickOutside(_ event: NSEvent) {
+        guard let window, event.window === window else { return }
+        guard let editingView = activeTextEditingView(in: window) else { return }
+
+        let pointInEditor = editingView.convert(event.locationInWindow, from: nil)
+        if editingView.bounds.insetBy(dx: -2, dy: -2).contains(pointInEditor) {
+            return
+        }
+        // Field editor lives separately from its NSTextField — keep focus when
+        // the click is still on that field's chrome.
+        if let textView = window.firstResponder as? NSTextView,
+           let field = textView.delegate as? NSTextField {
+            let pointInField = field.convert(event.locationInWindow, from: nil)
+            if field.bounds.insetBy(dx: -2, dy: -2).contains(pointInField) {
+                return
+            }
+        }
+
+        window.makeFirstResponder(nil)
+    }
+
+    private func activeTextEditingView(in window: NSWindow) -> NSView? {
+        let responder = window.firstResponder
+        if let field = responder as? NSTextField, field.isEditable {
+            return field
+        }
+        if let textView = responder as? NSTextView, textView.isEditable {
+            return textView
+        }
+        return nil
     }
 }
 
@@ -221,47 +332,55 @@ private final class CaptureLibraryContentContainer: NSView {
 private struct CaptureRowSuggestionState {
     var isLoading = false
     var suggestion: RenameSuggestion?
+    /// User-edited rename; `nil` falls back to `suggestion.suggestedName`.
+    var selectedName: String?
     var selectedProject: String?
     var selectedFlow: String?
-    /// Editable UI-component tags for the active Auto-Tag suggestion (seeded from the model).
-    var selectedComponents: [String] = []
     var acceptedSnapshot: CaptureLocationSnapshot?
     var wroteMapping = false
     var windowInfo: WindowSignature?
 
+    var effectiveName: String? {
+        if let selectedName {
+            let trimmed = selectedName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return suggestion?.suggestedName
+    }
+
+    /// `nil` = fall back to suggestion; `""` = explicitly cleared to None; otherwise the pick.
     var effectiveProject: String? {
-        if let selectedProject,
-           !selectedProject.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return selectedProject
+        if let selectedProject {
+            let trimmed = selectedProject.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         }
         return suggestion?.suggestedProject
     }
 
     var effectiveFlow: String? {
-        if let selectedFlow,
-           !selectedFlow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return selectedFlow
+        if let selectedFlow {
+            let trimmed = selectedFlow.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
         }
         return suggestion?.suggestedFlow
     }
 
-    var effectiveComponents: [String] {
-        selectedComponents
+    var showsNameEditor: Bool {
+        guard suggestion != nil else { return false }
+        return effectiveName != nil
     }
 
     var showsProjectPicker: Bool {
         guard suggestion != nil else { return false }
-        return suggestion?.hasProject == true || effectiveProject != nil
+        // Keep the control after clear (`""`) so it can show "None".
+        if selectedProject != nil { return true }
+        return suggestion?.hasProject == true
     }
 
     var showsFlowPicker: Bool {
         guard suggestion != nil else { return false }
-        return suggestion?.hasFlow == true || effectiveFlow != nil
-    }
-
-    var showsComponents: Bool {
-        guard suggestion != nil else { return false }
-        return !selectedComponents.isEmpty || suggestion?.hasComponents == true
+        if selectedFlow != nil { return true }
+        return suggestion?.hasFlow == true
     }
 }
 
@@ -275,6 +394,7 @@ fileprivate final class CaptureLibrarySessionState: ObservableObject {
 private enum CaptureLibraryGroupBy: String, CaseIterable, Identifiable {
     case none
     case project
+    case flow
 
     var id: String { rawValue }
 
@@ -282,15 +402,220 @@ private enum CaptureLibraryGroupBy: String, CaseIterable, Identifiable {
         switch self {
         case .none: return "None"
         case .project: return "Project"
+        case .flow: return "Flow"
+        }
+    }
+
+    var menuSymbol: String {
+        switch self {
+        case .none: return "list.bullet"
+        case .project: return "folder"
+        case .flow: return "arrow.triangle.branch"
         }
     }
 }
 
-private struct CaptureLibraryProjectGroup: Identifiable {
+private struct CaptureLibraryNamedGroup: Identifiable {
     let name: String
     let entries: [CaptureEntry]
 
     var id: String { name }
+}
+
+/// Sidebar list metrics so folder/file names share one text column.
+private enum CaptureLibrarySidebarMetrics {
+    static let columnWidth: CGFloat = 240
+    static let minColumnWidth: CGFloat = 180
+    static let maxColumnWidth: CGFloat = 420
+    /// Hit target for the resize gutter; visual rule stays centered inside.
+    static let resizeHandleWidth: CGFloat = 7
+    static let resizeRuleWidth: CGFloat = 1
+    static let resizeRuleHoverWidth: CGFloat = 3
+    /// Inset for the rounded hover/selection pill so it doesn’t bleed to the list edges.
+    static let rowBackgroundInset: CGFloat = DesignTokens.Spacing.sm
+    /// Matches `CaptureLibraryChrome.windowEdgeInset` at the window’s left edge.
+    static let rowLeading: CGFloat = CaptureLibraryChrome.windowEdgeInset
+    static let disclosureWidth: CGFloat = 10
+    static let groupIconSpacing: CGFloat = 6
+    /// Nested capture names align with group header names (disclosure sits left of names).
+    static var nestedRowLeading: CGFloat {
+        rowLeading + disclosureWidth + groupIconSpacing
+    }
+}
+
+/// Soft rule between sidebar and detail — matches surface, not system separator.
+private enum CaptureLibraryChrome {
+    static var divider: Color {
+        DesignTokens.Color.borderOnPanel.swiftUI
+    }
+
+    /// Uniform content margin at every window corner (top / leading / trailing / bottom).
+    /// Traffic lights are vertically centered to the header row and do not shrink this.
+    static let windowEdgeInset = DesignTokens.Spacing.md
+    /// Soft-control row height in the preview header (`.snipsnap` Auto-Tag ≈ 25pt).
+    static let headerControlHeight: CGFloat = 25
+    /// Top padding for the title + Project/Flow/Auto-Tag row — same as other corners.
+    static let topChromeInset = windowEdgeInset
+    /// Clears the header / traffic-light band so sidebar chrome sits below it.
+    static let belowTrafficLightsTop: CGFloat =
+        windowEdgeInset + headerControlHeight + DesignTokens.Spacing.sm
+}
+
+/// Turns off AppKit’s full-bleed `NSTableView` selection so only our inset pill shows.
+private struct CaptureLibraryListSelectionSuppressor: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.isHidden = true
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            var current: NSView? = nsView.superview
+            while let view = current {
+                if let table = Self.firstTableView(in: view) {
+                    if table.selectionHighlightStyle != .none {
+                        table.selectionHighlightStyle = .none
+                    }
+                    return
+                }
+                current = view.superview
+            }
+        }
+    }
+
+    private static func firstTableView(in root: NSView) -> NSTableView? {
+        if let table = root as? NSTableView { return table }
+        for subview in root.subviews {
+            if let table = firstTableView(in: subview) { return table }
+        }
+        return nil
+    }
+}
+
+/// Transparent hit target that resizes the sidebar from absolute window mouse X.
+/// Width = startWidth + (mouseX − startMouseX), clamped — so the bar sticks to the
+/// cursor until min/max, then snaps back when the cursor re-enters range.
+private struct CaptureLibrarySidebarResizeHandle: NSViewRepresentable {
+    var width: CGFloat
+    var minWidth: CGFloat
+    var maxWidth: CGFloat
+    var onHoverChange: (Bool) -> Void
+    var onDragBegan: () -> Void
+    var onWidthChange: (CGFloat) -> Void
+    var onDragEnded: () -> Void
+
+    func makeNSView(context: Context) -> CaptureLibrarySidebarResizeHandleView {
+        let view = CaptureLibrarySidebarResizeHandleView()
+        apply(to: view)
+        return view
+    }
+
+    func updateNSView(_ nsView: CaptureLibrarySidebarResizeHandleView, context: Context) {
+        apply(to: nsView)
+    }
+
+    private func apply(to view: CaptureLibrarySidebarResizeHandleView) {
+        view.currentWidth = width
+        view.minWidth = minWidth
+        view.maxWidth = maxWidth
+        view.onHoverChange = onHoverChange
+        view.onDragBegan = onDragBegan
+        view.onWidthChange = onWidthChange
+        view.onDragEnded = onDragEnded
+    }
+}
+
+private final class CaptureLibrarySidebarResizeHandleView: NSView {
+    var currentWidth: CGFloat = CaptureLibrarySidebarMetrics.columnWidth
+    var minWidth: CGFloat = CaptureLibrarySidebarMetrics.minColumnWidth
+    var maxWidth: CGFloat = CaptureLibrarySidebarMetrics.maxColumnWidth
+    var onHoverChange: ((Bool) -> Void)?
+    var onDragBegan: (() -> Void)?
+    var onWidthChange: ((CGFloat) -> Void)?
+    var onDragEnded: (() -> Void)?
+
+    private var dragStartWidth: CGFloat?
+    private var dragStartMouseX: CGFloat?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero,
+                options: [.activeInKeyWindow, .mouseEnteredAndExited, .cursorUpdate, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+        )
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onHoverChange?(true)
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onHoverChange?(false)
+        guard dragStartWidth == nil else { return }
+        NSCursor.arrow.set()
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        dragStartWidth = currentWidth
+        dragStartMouseX = event.locationInWindow.x
+        onDragBegan?()
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        applyWidth(for: event)
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        applyWidth(for: event)
+        dragStartWidth = nil
+        dragStartMouseX = nil
+        onDragEnded?()
+        let local = convert(event.locationInWindow, from: nil)
+        if bounds.contains(local) {
+            onHoverChange?(true)
+            NSCursor.resizeLeftRight.set()
+        } else {
+            onHoverChange?(false)
+            NSCursor.arrow.set()
+        }
+    }
+
+    private func applyWidth(for event: NSEvent) {
+        guard let startWidth = dragStartWidth, let startX = dragStartMouseX else { return }
+        // Window-space delta is independent of this view moving as the sidebar grows.
+        let proposed = startWidth + (event.locationInWindow.x - startX)
+        let clamped = min(max(proposed, minWidth), maxWidth)
+        onWidthChange?(clamped)
+    }
 }
 
 private struct CaptureLibraryView: View {
@@ -299,6 +624,9 @@ private struct CaptureLibraryView: View {
     let onOpen: (CaptureEntry) -> Void
 
     @AppStorage("captureLibraryGroupBy") private var groupByRaw = CaptureLibraryGroupBy.none.rawValue
+    @AppStorage("captureLibrarySidebarWidth") private var persistedSidebarWidth =
+        Double(CaptureLibrarySidebarMetrics.columnWidth)
+    @State private var sidebarWidth = CaptureLibrarySidebarMetrics.columnWidth
     @State private var selection = Set<UUID>()
     @State private var visibleCount = CaptureLibraryView.initialPageSize
     @State private var renameTarget: CaptureEntry?
@@ -307,21 +635,15 @@ private struct CaptureLibraryView: View {
     @State private var createProjectDraft = ""
     @State private var createFlowTarget: UUID?
     @State private var createFlowDraft = ""
-    @State private var createComponentTarget: UUID?
-    @State private var createComponentDraft = ""
-    @State private var replaceComponentTarget: (id: UUID, index: Int)?
-    @State private var replaceComponentDraft = ""
     /// Groups start collapsed; membership means the section is expanded.
     @State private var expandedGroupIDs = Set<String>()
     /// Manual double-click detection so rename does not use TapGesture(count: 2),
     /// which can swallow the first click and leave List selection unchanged.
     @State private var lastRowClick: (id: UUID, date: Date)?
 
-    @State private var showOrganizeSheet = false
-    @State private var organizePlan = OrganizePlan(matchedItems: [], unmatchedItems: [])
-    @State private var organizeLoading = false
-    @State private var includeOrganizedCaptures = false
-    @State private var organizeTask: Task<Void, Never>?
+    @State private var hoveredCaptureID: UUID?
+    @State private var isSidebarResizing = false
+    @State private var isSidebarResizeHandleHovered = false
 
     private static let initialPageSize = 40
     private static let pageSize = 40
@@ -330,13 +652,60 @@ private struct CaptureLibraryView: View {
         CaptureLibraryGroupBy(rawValue: groupByRaw) ?? .none
     }
 
+    private var clampedSidebarWidth: CGFloat {
+        min(
+            max(sidebarWidth, CaptureLibrarySidebarMetrics.minColumnWidth),
+            CaptureLibrarySidebarMetrics.maxColumnWidth
+        )
+    }
+
+    private func setSidebarWidth(_ width: CGFloat, persist: Bool) {
+        // Live drag stays continuous; only snap to whole points when persisting.
+        let raw = persist ? width.rounded() : width
+        let clamped = min(
+            max(raw, CaptureLibrarySidebarMetrics.minColumnWidth),
+            CaptureLibrarySidebarMetrics.maxColumnWidth
+        )
+        // Skip no-op writes at the clamp edges so layout doesn't thrash.
+        if !persist, sidebarWidth == clamped { return }
+        var transaction = Transaction()
+        transaction.animation = nil
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            sidebarWidth = clamped
+            if persist {
+                persistedSidebarWidth = Double(clamped)
+            }
+        }
+    }
+
     private var visibleEntries: [CaptureEntry] {
         Array(entries.prefix(visibleCount))
     }
 
-    private var projectGroups: [CaptureLibraryProjectGroup] {
-        let grouped = Dictionary(grouping: entries) { entry in
-            CaptureLibraryProject.currentName(for: entry) ?? "None"
+    private var projectGroups: [CaptureLibraryNamedGroup] {
+        namedGroups { entry in
+            [CaptureLibraryProject.currentName(for: entry) ?? "None"]
+        }
+    }
+
+    private var flowGroups: [CaptureLibraryNamedGroup] {
+        namedGroups { entry in
+            let flows = entry.tags
+                .filter { $0.kind == .flow }
+                .map(\.name)
+            return flows.isEmpty ? ["None"] : flows
+        }
+    }
+
+    private func namedGroups(
+        namesFor: (CaptureEntry) -> [String]
+    ) -> [CaptureLibraryNamedGroup] {
+        var grouped: [String: [CaptureEntry]] = [:]
+        for entry in entries {
+            for name in namesFor(entry) {
+                grouped[name, default: []].append(entry)
+            }
         }
         return grouped.keys
             .sorted { lhs, rhs in
@@ -345,68 +714,32 @@ private struct CaptureLibraryView: View {
                 return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
             }
             .map { key in
-                CaptureLibraryProjectGroup(name: key, entries: grouped[key] ?? [])
+                CaptureLibraryNamedGroup(name: key, entries: grouped[key] ?? [])
             }
     }
 
     var body: some View {
         HStack(spacing: 0) {
             sidebarColumn
-            Rectangle()
-                .fill(DesignTokens.Color.border.swiftUI.opacity(0.55))
-                .frame(width: 1)
-                .frame(maxHeight: .infinity)
+            sidebarResizeHandle
             detailColumn
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(DesignTokens.Color.background.swiftUI)
+                // Isolate detail geometry so sidebar width changes don't
+                // interpolate/jitter child text layout.
+                .geometryGroup()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(DesignTokens.Color.background.swiftUI)
-        // Prefer a solid toolbar fill; AppKit also strips titlebar vibrancy in applyTitlebarFill().
-        .toolbarBackground(DesignTokens.Color.background.swiftUI, for: .windowToolbar)
-        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Snipsnap")
-                    .font(.snipsnap(.windowTitle))
-                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
-            }
-            .sharedBackgroundVisibility(.hidden)
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    requestSuggestions(for: selection)
-                } label: {
-                    Label("Auto-Rename", systemImage: "sparkles")
-                        .font(.snipsnap(.body))
-                }
-                .controlSize(.small)
-                .disabled(selection.isEmpty)
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    presentOrganizeSheet()
-                } label: {
-                    Label("Organize", systemImage: "folder.badge.gearshape")
-                        .font(.snipsnap(.body))
-                }
-                .controlSize(.small)
-                .disabled(entries.isEmpty)
+        // Keep resize instantaneous — inherited animations make the title jitter.
+        .transaction { transaction in
+            if isSidebarResizing {
+                transaction.animation = nil
+                transaction.disablesAnimations = true
             }
         }
-        .sheet(isPresented: $showOrganizeSheet) {
-            OrganizePreviewSheet(
-                plan: $organizePlan,
-                isLoading: organizeLoading,
-                includeOrganized: $includeOrganizedCaptures,
-                onConfirm: confirmOrganize,
-                onCancel: {
-                    organizeTask?.cancel()
-                    showOrganizeSheet = false
-                }
-            )
-        }
-        .onChange(of: includeOrganizedCaptures) { _, _ in
-            reloadOrganizePlan()
-        }
+        // Edge-to-edge under the transparent titlebar; headers hug the top band.
+        .ignoresSafeArea()
         .alert("New Project", isPresented: createProjectAlertBinding) {
             TextField("Project name", text: $createProjectDraft)
             Button("Cancel", role: .cancel) {
@@ -415,7 +748,11 @@ private struct CaptureLibraryView: View {
             Button("Create") {
                 if let targetID = createProjectTarget,
                    let name = CaptureLibraryOrganizer.sanitizedProjectName(createProjectDraft) {
-                    setProject(name, for: targetID)
+                    if sessionState.rowStates[targetID]?.suggestion != nil {
+                        setProject(name, for: targetID)
+                    } else {
+                        _ = CaptureHistory.shared.addTag(id: targetID, kind: .project, name: name)
+                    }
                 }
                 createProjectTarget = nil
             }
@@ -429,43 +766,18 @@ private struct CaptureLibraryView: View {
                 if let targetID = createFlowTarget {
                     let name = CaptureTag.normalizeName(createFlowDraft)
                     if !name.isEmpty {
-                        setFlow(name, for: targetID)
+                        if sessionState.rowStates[targetID]?.suggestion != nil {
+                            setFlow(name, for: targetID)
+                        } else {
+                            _ = CaptureHistory.shared.addTag(id: targetID, kind: .flow, name: name)
+                        }
                     }
                 }
                 createFlowTarget = nil
             }
         }
-        .alert("Add Component", isPresented: createComponentAlertBinding) {
-            TextField("UI component (e.g. Button, Modal)", text: $createComponentDraft)
-            Button("Cancel", role: .cancel) {
-                createComponentTarget = nil
-            }
-            Button("Add") {
-                if let targetID = createComponentTarget {
-                    let name = CaptureTag.normalizeName(createComponentDraft)
-                    if !name.isEmpty {
-                        addComponent(name, for: targetID)
-                    }
-                }
-                createComponentTarget = nil
-            }
-        }
-        .alert("Edit Component", isPresented: replaceComponentAlertBinding) {
-            TextField("UI component", text: $replaceComponentDraft)
-            Button("Cancel", role: .cancel) {
-                replaceComponentTarget = nil
-            }
-            Button("Save") {
-                if let target = replaceComponentTarget {
-                    let name = CaptureTag.normalizeName(replaceComponentDraft)
-                    if !name.isEmpty {
-                        replaceComponent(at: target.index, with: name, for: target.id)
-                    }
-                }
-                replaceComponentTarget = nil
-            }
-        }
         .onAppear {
+            setSidebarWidth(CGFloat(persistedSidebarWidth), persist: false)
             resetVisibleWindow()
             if selection.isEmpty, let first = entries.first {
                 selection = [first.id]
@@ -474,6 +786,12 @@ private struct CaptureLibraryView: View {
         .onChange(of: groupByRaw) { _, _ in
             expandedGroupIDs = []
         }
+        .onChange(of: selection) { oldSelection, newSelection in
+            // "Organized" is a temporary confirm affordance — dismiss it when
+            // the user clicks away to another sidebar item.
+            let deselected = oldSelection.subtracting(newSelection)
+            dismissOrganizedConfirmation(for: deselected)
+        }
         .onChange(of: entries.count) { _, _ in
             selection = selection.filter { id in entries.contains(where: { $0.id == id }) }
             if selection.isEmpty, let first = entries.first {
@@ -481,6 +799,38 @@ private struct CaptureLibraryView: View {
             }
             ensureSelectionVisible()
         }
+    }
+
+    private var sidebarResizeHandle: some View {
+        let isActive = isSidebarResizeHandleHovered || isSidebarResizing
+        return ZStack {
+            Color.clear
+            Rectangle()
+                .fill(CaptureLibraryChrome.divider)
+                .frame(
+                    width: isActive
+                        ? CaptureLibrarySidebarMetrics.resizeRuleHoverWidth
+                        : CaptureLibrarySidebarMetrics.resizeRuleWidth
+                )
+                .animation(.easeInOut(duration: 0.12), value: isActive)
+            // AppKit tracks window-space mouse X so the divider stays glued to the
+            // cursor; SwiftUI DragGesture drifts as the handle's frame moves.
+            CaptureLibrarySidebarResizeHandle(
+                width: clampedSidebarWidth,
+                minWidth: CaptureLibrarySidebarMetrics.minColumnWidth,
+                maxWidth: CaptureLibrarySidebarMetrics.maxColumnWidth,
+                onHoverChange: { isSidebarResizeHandleHovered = $0 },
+                onDragBegan: { isSidebarResizing = true },
+                onWidthChange: { setSidebarWidth($0, persist: false) },
+                onDragEnded: {
+                    setSidebarWidth(clampedSidebarWidth, persist: true)
+                    isSidebarResizing = false
+                }
+            )
+        }
+        .frame(width: CaptureLibrarySidebarMetrics.resizeHandleWidth)
+        .frame(maxHeight: .infinity)
+        .help("Drag to resize")
     }
 
     private var selectedEntry: CaptureEntry? {
@@ -503,9 +853,9 @@ private struct CaptureLibraryView: View {
             } else {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                     groupByPicker
-                        .padding(.horizontal, DesignTokens.Spacing.md)
-                        .padding(.top, DesignTokens.Spacing.sm)
-                        .fixedSize(horizontal: true, vertical: true)
+                        .padding(.horizontal, CaptureLibrarySidebarMetrics.rowLeading)
+                        .padding(.top, CaptureLibraryChrome.belowTrafficLightsTop)
+                        .padding(.bottom, DesignTokens.Spacing.xs)
 
                     GeometryReader { geo in
                         captureList
@@ -517,77 +867,38 @@ private struct CaptureLibraryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .frame(width: 300)
+        .frame(width: clampedSidebarWidth)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(DesignTokens.Color.background.swiftUI)
     }
 
     private var groupByPicker: some View {
-        Menu {
+        SoftControlDropdown(
+            leadingLabel: "Group by",
+            title: groupBy.menuLabel,
+            help: "Group captures in the sidebar"
+        ) {
             ForEach(CaptureLibraryGroupBy.allCases) { option in
-                Button {
+                SoftDropdownRow(
+                    title: option.menuLabel,
+                    systemImage: option.menuSymbol,
+                    isSelected: option == groupBy
+                ) {
                     groupByRaw = option.rawValue
-                } label: {
-                    if option == groupBy {
-                        Label(option.menuLabel, systemImage: "checkmark")
-                    } else {
-                        Text(option.menuLabel)
-                    }
                 }
             }
-        } label: {
-            HStack(spacing: 6) {
-                Text("Group by")
-                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
-                Text(groupBy.menuLabel)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-            }
-            .font(.custom(DesignTokens.Typography.postScriptName(for: .medium), size: 14))
-            .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
         }
-        .menuStyle(.borderlessButton)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .stroke(DesignTokens.Color.border.swiftUI, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
-        .pointerStyle(.link)
-        .help("Group captures in the sidebar")
     }
 
     @ViewBuilder
     private var captureList: some View {
         List(selection: $selection) {
-            if groupBy == .project {
-                ForEach(projectGroups) { group in
-                    projectGroupHeader(for: group)
-                        .selectionDisabled()
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(
-                            top: DesignTokens.Spacing.xs,
-                            leading: 0,
-                            bottom: DesignTokens.Spacing.xs,
-                            trailing: 0
-                        ))
-
-                    if expandedGroupIDs.contains(group.id) {
-                        ForEach(group.entries) { entry in
-                            captureListRow(for: entry, nested: true)
-                        }
-                    }
-                }
-            } else {
+            switch groupBy {
+            case .project:
+                groupedCaptureSections(projectGroups)
+            case .flow:
+                groupedCaptureSections(flowGroups)
+            case .none:
                 ForEach(visibleEntries) { entry in
                     captureListRow(for: entry)
                         .onAppear {
@@ -599,25 +910,54 @@ private struct CaptureLibraryView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .contentMargins(.horizontal, 0, for: .scrollContent)
+        .contentMargins(.bottom, CaptureLibraryChrome.windowEdgeInset, for: .scrollContent)
         .background(DesignTokens.Color.background.swiftUI)
+        .background(CaptureLibraryListSelectionSuppressor())
     }
 
-    private func projectGroupHeader(for group: CaptureLibraryProjectGroup) -> some View {
+    @ViewBuilder
+    private func groupedCaptureSections(
+        _ groups: [CaptureLibraryNamedGroup]
+    ) -> some View {
+        ForEach(groups) { group in
+            namedGroupHeader(for: group)
+                .selectionDisabled()
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(
+                    top: DesignTokens.Spacing.xs,
+                    leading: CaptureLibrarySidebarMetrics.rowLeading,
+                    bottom: DesignTokens.Spacing.xs,
+                    trailing: CaptureLibrarySidebarMetrics.rowLeading
+                ))
+
+            if expandedGroupIDs.contains(group.id) {
+                ForEach(group.entries) { entry in
+                    captureListRow(for: entry, nested: true)
+                }
+            }
+        }
+    }
+
+    private func namedGroupHeader(
+        for group: CaptureLibraryNamedGroup
+    ) -> some View {
         let isExpanded = expandedGroupIDs.contains(group.id)
         return Button {
             toggleGroupExpanded(group.id)
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: CaptureLibrarySidebarMetrics.groupIconSpacing) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-                    .frame(width: 10, alignment: .center)
+                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                    .frame(width: CaptureLibrarySidebarMetrics.disclosureWidth, alignment: .center)
 
                 Text(group.name)
                     .font(.snipsnap(.caption))
-                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
-
-                Spacer(minLength: 0)
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -644,15 +984,30 @@ private struct CaptureLibraryView: View {
                 onAcceptSuggestion: { acceptSuggestion(for: $0) },
                 onDismissSuggestion: { dismissSuggestion(for: $0) },
                 onRevertSuggestion: { revertSuggestion(for: $0) },
+                onSelectName: { setSuggestedName($0, for: $1) },
                 onSelectProject: { setProject($0, for: $1) },
                 onCreateProject: { beginCreateProject(for: $0) },
                 onSelectFlow: { setFlow($0, for: $1) },
                 onCreateFlow: { beginCreateFlow(for: $0) },
-                onSelectComponent: { name, index, id in replaceComponent(at: index, with: name, for: id) },
-                onRemoveComponent: { index, id in removeComponent(at: index, for: id) },
-                onCreateComponent: { beginCreateComponent(for: $0) },
-                onEditComponent: { index, id in beginEditComponent(at: index, for: id) },
-                onClearProject: { clearSuggestedProject(for: $0) }
+                onClearProject: { clearSuggestedProject(for: $0) },
+                onClearFlow: { clearSuggestedFlow(for: $0) },
+                onRemoveTag: { entry, tag in
+                    if entry.tags.contains(where: { $0.id == tag.id }) {
+                        _ = CaptureHistory.shared.removeTag(id: entry.id, tagID: tag.id)
+                    } else if tag.kind == .project {
+                        _ = CaptureHistory.shared.clearProjectTag(id: entry.id)
+                    }
+                },
+                onReplaceTag: { entry, tag, name in
+                    if tag.kind == .project {
+                        _ = CaptureHistory.shared.addTag(id: entry.id, kind: .project, name: name)
+                    } else if entry.tags.contains(where: { $0.id == tag.id }) {
+                        _ = CaptureHistory.shared.removeTag(id: entry.id, tagID: tag.id)
+                        _ = CaptureHistory.shared.addTag(id: entry.id, kind: tag.kind, name: name)
+                    } else {
+                        _ = CaptureHistory.shared.addTag(id: entry.id, kind: tag.kind, name: name)
+                    }
+                }
             )
         } else if let entry = selectedEntry {
             CapturePreviewPane(
@@ -662,15 +1017,13 @@ private struct CaptureLibraryView: View {
                 onAutoTag: { requestSuggestion(for: entry) },
                 onAcceptSuggestion: { acceptSuggestion(for: entry) },
                 onDismissSuggestion: { dismissSuggestion(for: entry) },
+                onSelectName: { setSuggestedName($0, for: entry.id) },
                 onSelectProject: { setProject($0, for: entry.id) },
                 onCreateProject: { beginCreateProject(for: entry.id) },
                 onSelectFlow: { setFlow($0, for: entry.id) },
                 onCreateFlow: { beginCreateFlow(for: entry.id) },
-                onSelectComponent: { name, index in replaceComponent(at: index, with: name, for: entry.id) },
-                onRemoveComponent: { index in removeComponent(at: index, for: entry.id) },
-                onCreateComponent: { beginCreateComponent(for: entry.id) },
-                onEditComponent: { index in beginEditComponent(at: index, for: entry.id) },
                 onClearProject: { clearSuggestedProject(for: entry.id) },
+                onClearFlow: { clearSuggestedFlow(for: entry.id) },
                 onRemoveTag: { tag in
                     if entry.tags.contains(where: { $0.id == tag.id }) {
                         _ = CaptureHistory.shared.removeTag(id: entry.id, tagID: tag.id)
@@ -678,16 +1031,33 @@ private struct CaptureLibraryView: View {
                         _ = CaptureHistory.shared.clearProjectTag(id: entry.id)
                     }
                 },
-                onAddTag: { kind, name in
-                    _ = CaptureHistory.shared.addTag(id: entry.id, kind: kind, name: name)
+                onReplaceTag: { tag, name in
+                    if tag.kind == .project {
+                        _ = CaptureHistory.shared.addTag(id: entry.id, kind: .project, name: name)
+                    } else if entry.tags.contains(where: { $0.id == tag.id }) {
+                        _ = CaptureHistory.shared.removeTag(id: entry.id, tagID: tag.id)
+                        _ = CaptureHistory.shared.addTag(id: entry.id, kind: tag.kind, name: name)
+                    } else {
+                        _ = CaptureHistory.shared.addTag(id: entry.id, kind: tag.kind, name: name)
+                    }
                 }
             )
         } else {
-            ContentUnavailableView(
-                "Select a Capture",
-                systemImage: "sidebar.left",
-                description: Text("Choose a screenshot or recording from the sidebar.")
-            )
+            VStack(spacing: DesignTokens.Spacing.md) {
+                RabbitIcon(width: 56)
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+
+                Text("Select a Capture")
+                    .font(.snipsnap(.panelTitle))
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+
+                Text("Choose a screenshot or recording from the sidebar.")
+                    .font(.snipsnap(.caption))
+                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(DesignTokens.Spacing.xl)
         }
     }
 
@@ -720,17 +1090,33 @@ private struct CaptureLibraryView: View {
             }
         }
         .tag(entry.id)
-        .listRowBackground(listRowBackground(isSelected: selection.contains(entry.id)))
+        .listRowBackground(
+            listRowBackground(
+                isSelected: selection.contains(entry.id),
+                isHovered: hoveredCaptureID == entry.id
+            )
+        )
         .listRowSeparator(.hidden)
         .listRowInsets(EdgeInsets(
             top: DesignTokens.Spacing.xs,
-            leading: nested ? DesignTokens.Spacing.lg : DesignTokens.Spacing.sm,
+            // Nested names share the group-name column (disclosure + type icon sit left of names).
+            leading: nested
+                ? CaptureLibrarySidebarMetrics.nestedRowLeading
+                : CaptureLibrarySidebarMetrics.rowLeading,
             bottom: DesignTokens.Spacing.xs,
-            trailing: nested ? DesignTokens.Spacing.md : DesignTokens.Spacing.sm
+            trailing: CaptureLibrarySidebarMetrics.rowLeading
         ))
         // Custom light selection fill — keep labels dark instead of List's white-on-accent tint.
         .environment(\.backgroundProminence, .standard)
         .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+        .onHover { hovering in
+            if hovering {
+                hoveredCaptureID = entry.id
+            } else if hoveredCaptureID == entry.id {
+                hoveredCaptureID = nil
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: hoveredCaptureID == entry.id)
         .contextMenu {
             Button {
                 requestSuggestion(for: entry)
@@ -776,11 +1162,19 @@ private struct CaptureLibraryView: View {
         }
     }
 
-    private func listRowBackground(isSelected: Bool) -> some View {
+    private func listRowBackground(isSelected: Bool, isHovered: Bool) -> some View {
         // Same view type always — swapping Clear ↔ Shape on select
         // can nudge List layout/scroll during selection changes.
-        Rectangle()
-            .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(isSelected ? 1 : 0))
+        // Opaque window fill first so AppKit’s full-bleed selection never shows through.
+        let fillOpacity: CGFloat = isSelected ? 1 : (isHovered ? 0.55 : 0)
+        return ZStack {
+            DesignTokens.Color.background.swiftUI
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
+                .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(fillOpacity))
+                .padding(.horizontal, CaptureLibrarySidebarMetrics.rowBackgroundInset)
+                // 0.5pt each side → 1pt gap between adjacent row backgrounds.
+                .padding(.vertical, 0.5)
+        }
     }
 
     private var createProjectAlertBinding: Binding<Bool> {
@@ -794,20 +1188,6 @@ private struct CaptureLibraryView: View {
         Binding(
             get: { createFlowTarget != nil },
             set: { if !$0 { createFlowTarget = nil } }
-        )
-    }
-
-    private var createComponentAlertBinding: Binding<Bool> {
-        Binding(
-            get: { createComponentTarget != nil },
-            set: { if !$0 { createComponentTarget = nil } }
-        )
-    }
-
-    private var replaceComponentAlertBinding: Binding<Bool> {
-        Binding(
-            get: { replaceComponentTarget != nil },
-            set: { if !$0 { replaceComponentTarget = nil } }
         )
     }
 
@@ -839,26 +1219,26 @@ private struct CaptureLibraryView: View {
 
     private func beginCreateProject(for id: UUID) {
         createProjectTarget = id
-        createProjectDraft = sessionState.rowStates[id]?.effectiveProject ?? ""
+        if let suggested = sessionState.rowStates[id]?.effectiveProject, !suggested.isEmpty {
+            createProjectDraft = suggested
+        } else if let entry = entries.first(where: { $0.id == id }) {
+            createProjectDraft = CaptureLibraryProject.currentName(for: entry)
+                ?? entry.tags.first(where: { $0.kind == .project })?.name
+                ?? ""
+        } else {
+            createProjectDraft = ""
+        }
     }
 
     private func beginCreateFlow(for id: UUID) {
         createFlowTarget = id
-        createFlowDraft = sessionState.rowStates[id]?.effectiveFlow ?? ""
-    }
-
-    private func beginCreateComponent(for id: UUID) {
-        createComponentTarget = id
-        createComponentDraft = ""
-    }
-
-    private func beginEditComponent(at index: Int, for id: UUID) {
-        guard let components = sessionState.rowStates[id]?.selectedComponents,
-              components.indices.contains(index) else {
-            return
+        if let suggested = sessionState.rowStates[id]?.effectiveFlow, !suggested.isEmpty {
+            createFlowDraft = suggested
+        } else if let entry = entries.first(where: { $0.id == id }) {
+            createFlowDraft = entry.tags.first(where: { $0.kind == .flow })?.name ?? ""
+        } else {
+            createFlowDraft = ""
         }
-        replaceComponentTarget = (id: id, index: index)
-        replaceComponentDraft = components[index]
     }
 
     private func setProject(_ project: String, for id: UUID) {
@@ -869,15 +1249,8 @@ private struct CaptureLibraryView: View {
 
     private func clearSuggestedProject(for id: UUID) {
         updateRowState(id) { state in
-            state.selectedProject = nil
-            guard let suggestion = state.suggestion else { return }
-            state.suggestion = RenameSuggestion(
-                suggestedName: suggestion.suggestedName,
-                suggestedProject: nil,
-                suggestedFlow: suggestion.suggestedFlow,
-                suggestedComponents: suggestion.suggestedComponents,
-                confidence: suggestion.confidence
-            )
+            // Empty string = explicit None; keeps the picker visible.
+            state.selectedProject = ""
         }
     }
 
@@ -887,35 +1260,9 @@ private struct CaptureLibraryView: View {
         }
     }
 
-    private func addComponent(_ name: String, for id: UUID) {
-        let normalized = CaptureTag.normalizeName(name)
-        guard !normalized.isEmpty else { return }
+    private func clearSuggestedFlow(for id: UUID) {
         updateRowState(id) { state in
-            guard !state.selectedComponents.contains(where: {
-                $0.caseInsensitiveCompare(normalized) == .orderedSame
-            }) else { return }
-            state.selectedComponents.append(normalized)
-        }
-    }
-
-    private func replaceComponent(at index: Int, with name: String, for id: UUID) {
-        let normalized = CaptureTag.normalizeName(name)
-        guard !normalized.isEmpty else { return }
-        updateRowState(id) { state in
-            guard state.selectedComponents.indices.contains(index) else { return }
-            if let existing = state.selectedComponents.firstIndex(where: {
-                $0.caseInsensitiveCompare(normalized) == .orderedSame
-            }), existing != index {
-                return
-            }
-            state.selectedComponents[index] = normalized
-        }
-    }
-
-    private func removeComponent(at index: Int, for id: UUID) {
-        updateRowState(id) { state in
-            guard state.selectedComponents.indices.contains(index) else { return }
-            state.selectedComponents.remove(at: index)
+            state.selectedFlow = ""
         }
     }
 
@@ -941,7 +1288,10 @@ private struct CaptureLibraryView: View {
     }
 
     private func showInFinder(_ entry: CaptureEntry) {
-        guard let url = CaptureHistory.shared.fileURL(for: entry.id) else { return }
+        // Fall back to the stored path so Finder still opens after iCloud/move races
+        // where fileExists briefly fails.
+        guard let url = CaptureHistory.shared.fileURL(for: entry.id)
+            ?? CaptureHistory.shared.storedFileURL(for: entry.id) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
@@ -971,9 +1321,9 @@ private struct CaptureLibraryView: View {
         updateRowState(entry.id) { state in
             state.isLoading = true
             state.suggestion = nil
+            state.selectedName = nil
             state.selectedProject = nil
             state.selectedFlow = nil
-            state.selectedComponents = []
             state.acceptedSnapshot = nil
             state.wroteMapping = false
             state.windowInfo = windowInfo
@@ -986,12 +1336,18 @@ private struct CaptureLibraryView: View {
                 updateRowState(entry.id) { state in
                     state.isLoading = false
                     state.suggestion = suggestion
+                    state.selectedName = suggestion?.suggestedName
                     state.selectedProject = suggestion?.suggestedProject
                     state.selectedFlow = suggestion?.suggestedFlow
-                    state.selectedComponents = suggestion?.suggestedComponents ?? []
                     state.windowInfo = windowInfo
                 }
             }
+        }
+    }
+
+    private func setSuggestedName(_ name: String, for id: UUID) {
+        updateRowState(id) { state in
+            state.selectedName = name
         }
     }
 
@@ -1003,10 +1359,9 @@ private struct CaptureLibraryView: View {
         }
 
         let effectiveSuggestion = RenameSuggestion(
-            suggestedName: suggestion.suggestedName,
+            suggestedName: state.effectiveName,
             suggestedProject: state.effectiveProject,
             suggestedFlow: state.effectiveFlow,
-            suggestedComponents: state.effectiveComponents,
             confidence: suggestion.confidence
         )
 
@@ -1020,9 +1375,9 @@ private struct CaptureLibraryView: View {
             row.acceptedSnapshot = snapshot
             row.wroteMapping = effectiveSuggestion.hasProject && row.windowInfo != nil
             row.suggestion = nil
+            row.selectedName = nil
             row.selectedProject = nil
             row.selectedFlow = nil
-            row.selectedComponents = []
             row.isLoading = false
         }
     }
@@ -1030,9 +1385,9 @@ private struct CaptureLibraryView: View {
     private func dismissSuggestion(for entry: CaptureEntry) {
         updateRowState(entry.id) { state in
             state.suggestion = nil
+            state.selectedName = nil
             state.selectedProject = nil
             state.selectedFlow = nil
-            state.selectedComponents = []
             state.isLoading = false
         }
     }
@@ -1050,46 +1405,14 @@ private struct CaptureLibraryView: View {
         sessionState.rowStates.removeValue(forKey: entry.id)
     }
 
-    // MARK: - Batch organize
-
-    private func presentOrganizeSheet() {
-        showOrganizeSheet = true
-        reloadOrganizePlan()
-    }
-
-    private func reloadOrganizePlan() {
-        organizeTask?.cancel()
-        organizeLoading = true
-        let targets = CaptureLibraryOrganizer.targetEntries(
-            from: entries,
-            includeOrganized: includeOrganizedCaptures
-        )
-
-        organizeTask = Task {
-            let plan = await CaptureLibraryOrganizer.buildPlan(for: targets)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                organizePlan = plan
-                organizeLoading = false
-            }
+    /// Drops the post-accept "Organized" chrome without undoing the organize.
+    private func dismissOrganizedConfirmation(for ids: Set<UUID>) {
+        for id in ids {
+            guard sessionState.rowStates[id]?.acceptedSnapshot != nil else { continue }
+            sessionState.rowStates.removeValue(forKey: id)
         }
     }
 
-    private func confirmOrganize() {
-        guard let result = CaptureLibraryOrganizer.execute(plan: organizePlan) else { return }
-        showOrganizeSheet = false
-
-        let message = "Moved \(result.movedCount) files into \(result.projectCount) projects"
-        ToastWindow.show(
-            message: message,
-            associatedCaptureID: nil,
-            actionTitle: "Undo",
-            hostWindow: CaptureLibraryWindow.current,
-            onAction: {
-                CaptureLibraryOrganizer.revert(batch: result)
-            }
-        )
-    }
 }
 
 /// AppKit-backed rename field so the current name is visible immediately and
@@ -1245,7 +1568,7 @@ private struct CaptureSidebarRow: View {
             HStack(spacing: 4) {
                 Text("Organized")
                     .font(.snipsnap(.caption))
-                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
                 Button(action: onRevertSuggestion) {
                     Image(systemName: "arrow.uturn.backward")
                         .font(.system(size: 10, weight: .semibold))
@@ -1275,182 +1598,22 @@ private enum CaptureLibraryProject {
     }
 }
 
-/// Dropdown chip for editing a suggested project/flow before confirming Auto-Tag.
-private struct SuggestionTagMenu: View {
-    let kind: CaptureTagKind
-    let selected: String
-    let options: [String]
-    var emphasized: Bool = false
-    var onRemove: (() -> Void)? = nil
-    let onSelect: (String) -> Void
-    let onCreateNew: () -> Void
+/// Idle Auto-Tag label (rabbit + text), or centered hop loader while requesting.
+/// Loader is overlaid so its taller frame can't grow the button and nudge the preview.
+private struct AutoTagButtonLabel: View {
+    let isLoading: Bool
 
     var body: some View {
-        HStack(spacing: 4) {
-            if kind == .project {
-                Image(systemName: "folder.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-            }
-
-            Text(kind.displayName)
-                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-
-            Menu {
-                ForEach(options, id: \.self) { name in
-                    Button(name) {
-                        onSelect(name)
-                    }
-                }
-
-                if !options.isEmpty {
-                    Divider()
-                }
-
-                Button("Custom…") {
-                    onCreateNew()
-                }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(selected)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                }
-                .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(emphasized ? 0.85 : 0.7))
-                .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .pointerStyle(.link)
-            .fixedSize()
-
-            if let onRemove {
-                Button(action: onRemove) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-                }
-                .buttonStyle(.plain)
-                .pointerStyle(.link)
-                .help(kind == .project ? "Don’t move to a project folder" : "Remove \(kind.displayName.lowercased())")
+        HStack(spacing: 6) {
+            RabbitIcon(width: 18)
+            Text("Auto-Tag")
+        }
+        .opacity(isLoading ? 0 : 1)
+        .overlay {
+            if isLoading {
+                RabbitHopLoader(size: .compact)
             }
         }
-        .font(.snipsnap(.caption))
-        .padding(.horizontal, DesignTokens.Spacing.sm)
-        .padding(.vertical, emphasized ? 5 : 3)
-        .background(
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
-                .overlay {
-                    if emphasized {
-                        RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                            .strokeBorder(DesignTokens.Color.primary.swiftUI.opacity(0.3), lineWidth: 1)
-                    }
-                }
-        )
-        .help(
-            kind == .project
-                ? "Project folder — Confirm moves the file here"
-                : "Change \(kind.displayName.lowercased())"
-        )
-    }
-}
-
-/// Editable/removable UI-component chip shown during Auto-Tag review.
-private struct SuggestionComponentChip: View {
-    let name: String
-    let options: [String]
-    var emphasized: Bool = true
-    let onSelect: (String) -> Void
-    let onEditCustom: () -> Void
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Text(CaptureTagKind.component.displayName)
-                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-
-            Menu {
-                ForEach(options, id: \.self) { option in
-                    Button(option) {
-                        onSelect(option)
-                    }
-                }
-
-                if !options.isEmpty {
-                    Divider()
-                }
-
-                Button("Custom…") {
-                    onEditCustom()
-                }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(name)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                }
-                .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(emphasized ? 0.85 : 0.7))
-                .contentShape(Rectangle())
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .pointerStyle(.link)
-            .fixedSize()
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-            }
-            .buttonStyle(.plain)
-            .pointerStyle(.link)
-            .help("Remove component")
-        }
-        .font(.snipsnap(.caption))
-        .padding(.horizontal, DesignTokens.Spacing.sm)
-        .padding(.vertical, emphasized ? 5 : 3)
-        .background(
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
-                .overlay {
-                    if emphasized {
-                        RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                            .strokeBorder(DesignTokens.Color.primary.swiftUI.opacity(0.3), lineWidth: 1)
-                    }
-                }
-        )
-        .help("Change UI component")
-    }
-}
-
-/// Compact “+ Component” control for Auto-Tag review.
-private struct SuggestionAddComponentButton: View {
-    let onAdd: () -> Void
-
-    var body: some View {
-        Button(action: onAdd) {
-            HStack(spacing: 4) {
-                Image(systemName: "plus")
-                    .font(.system(size: 9, weight: .bold))
-                Text("Component")
-            }
-            .font(.snipsnap(.caption))
-            .foregroundStyle(DesignTokens.Color.primary.swiftUI.opacity(0.75))
-            .padding(.horizontal, DesignTokens.Spacing.sm)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                    .strokeBorder(DesignTokens.Color.primary.swiftUI.opacity(0.25), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .pointerStyle(.link)
-        .help("Add UI component tag")
     }
 }
 
@@ -1461,22 +1624,47 @@ private struct CaptureMultiSelectPane: View {
     let onAcceptSuggestion: (CaptureEntry) -> Void
     let onDismissSuggestion: (CaptureEntry) -> Void
     let onRevertSuggestion: (CaptureEntry) -> Void
+    let onSelectName: (String, UUID) -> Void
     let onSelectProject: (String, UUID) -> Void
     let onCreateProject: (UUID) -> Void
     let onSelectFlow: (String, UUID) -> Void
     let onCreateFlow: (UUID) -> Void
-    let onSelectComponent: (String, Int, UUID) -> Void
-    let onRemoveComponent: (Int, UUID) -> Void
-    let onCreateComponent: (UUID) -> Void
-    let onEditComponent: (Int, UUID) -> Void
     let onClearProject: (UUID) -> Void
+    let onClearFlow: (UUID) -> Void
+    let onRemoveTag: (CaptureEntry, CaptureTag) -> Void
+    let onReplaceTag: (CaptureEntry, CaptureTag, String) -> Void
 
     private var isAnyLoading: Bool {
         entries.contains { rowStates[$0.id]?.isLoading == true }
     }
 
+    private var projectOptions: [String] {
+        CaptureLibraryOrganizer.existingProjectNames()
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Text("\(entries.count) selected")
+                    .font(.snipsnap(.bodyEmphasized))
+                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                Spacer(minLength: 0)
+                Button {
+                    onAutoTag()
+                } label: {
+                    AutoTagButtonLabel(isLoading: isAnyLoading)
+                }
+                .buttonStyle(.snipsnap)
+                .fixedSize()
+                .disabled(entries.isEmpty)
+                .allowsHitTesting(!isAnyLoading)
+                .help(isAnyLoading ? "Auto-tagging…" : "Auto-Tag")
+            }
+            .padding(.leading, CaptureLibraryChrome.windowEdgeInset)
+            .padding(.trailing, CaptureLibraryChrome.windowEdgeInset)
+            .padding(.top, CaptureLibraryChrome.topChromeInset)
+            .padding(.bottom, DesignTokens.Spacing.sm)
+
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(entries) { entry in
@@ -1491,25 +1679,6 @@ private struct CaptureMultiSelectPane: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DesignTokens.Color.background.swiftUI)
-
-            Divider()
-
-            HStack {
-                Button {
-                    onAutoTag()
-                } label: {
-                    Label("Auto-Tag", systemImage: "sparkles")
-                }
-                .buttonStyle(.snipsnap)
-                .disabled(entries.isEmpty || isAnyLoading)
-
-                Spacer()
-
-                Text("\(entries.count) selected")
-                    .font(.snipsnap(.caption))
-                    .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
-            }
-            .padding(DesignTokens.Spacing.lg)
         }
     }
 
@@ -1525,16 +1694,16 @@ private struct CaptureMultiSelectPane: View {
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
 
             VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-                Text(displayName(for: entry, rowState: rowState))
-                    .font(.snipsnap(.bodyEmphasized))
-                    .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
-                    .lineLimit(1)
+                if rowState.showsNameEditor, let name = rowState.effectiveName {
+                    SuggestedNameField(name: name) { onSelectName($0, entry.id) }
+                } else {
+                    Text(entry.displayName)
+                        .font(.snipsnap(.bodyEmphasized))
+                        .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+                        .lineLimit(1)
+                }
 
                 projectAndTags(for: entry, rowState: rowState)
-
-                Text(entry.createdAt.compactRelativeLabel)
-                    .font(.snipsnap(.caption))
-                    .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
             }
 
             Spacer(minLength: 0)
@@ -1546,118 +1715,119 @@ private struct CaptureMultiSelectPane: View {
         .contentShape(Rectangle())
     }
 
-    private func displayName(for entry: CaptureEntry, rowState: CaptureRowSuggestionState) -> String {
-        if let suggestion = rowState.suggestion,
-           suggestion.hasRename,
-           let name = suggestion.suggestedName {
-            return name
+    @ViewBuilder
+    private func projectAndTags(for entry: CaptureEntry, rowState: CaptureRowSuggestionState) -> some View {
+        let hasSuggestion = rowState.suggestion != nil
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
+            HStack(spacing: DesignTokens.Spacing.sm) {
+                committedProjectDropdown(for: entry, isReadOnly: hasSuggestion)
+                committedFlowDropdown(for: entry, rowState: rowState, isReadOnly: hasSuggestion)
+            }
+
+            if hasSuggestion {
+                HStack(spacing: DesignTokens.Spacing.sm) {
+                    if rowState.showsProjectPicker {
+                        TagKindDropdown(
+                            kind: .project,
+                            selected: rowState.effectiveProject ?? "None",
+                            options: projectOptions,
+                            onRemove: rowState.effectiveProject == nil
+                                ? nil
+                                : { onClearProject(entry.id) },
+                            onSelect: { onSelectProject($0, entry.id) },
+                            onCreateNew: { onCreateProject(entry.id) }
+                        )
+                    }
+                    if rowState.showsFlowPicker {
+                        TagKindDropdown(
+                            kind: .flow,
+                            selected: rowState.effectiveFlow ?? "None",
+                            options: flowOptions(for: entry, rowState: rowState),
+                            onRemove: rowState.effectiveFlow == nil
+                                ? nil
+                                : { onClearFlow(entry.id) },
+                            onSelect: { onSelectFlow($0, entry.id) },
+                            onCreateNew: { onCreateFlow(entry.id) }
+                        )
+                    }
+                }
+            }
         }
-        return entry.displayName
     }
 
     @ViewBuilder
-    private func projectAndTags(for entry: CaptureEntry, rowState: CaptureRowSuggestionState) -> some View {
-        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-            HStack(spacing: DesignTokens.Spacing.sm) {
-                metaChip(
-                    label: "Project",
-                    value: CaptureLibraryProject.currentName(for: entry) ?? "None"
-                )
-
-                if rowState.showsProjectPicker, let project = rowState.effectiveProject {
-                    SuggestionTagMenu(
-                        kind: .project,
-                        selected: project,
-                        options: projectOptions(for: rowState),
-                        emphasized: false,
-                        onRemove: { onClearProject(entry.id) },
-                        onSelect: { onSelectProject($0, entry.id) },
-                        onCreateNew: { onCreateProject(entry.id) }
-                    )
-                } else if let project = rowState.effectiveProject {
-                    metaChip(label: "Tag", value: project)
-                } else if rowState.acceptedSnapshot != nil {
-                    metaChip(label: "Tag", value: "Organized")
-                }
-
-                if rowState.showsFlowPicker, let flow = rowState.effectiveFlow {
-                    SuggestionTagMenu(
-                        kind: .flow,
-                        selected: flow,
-                        options: flowOptions(for: rowState),
-                        emphasized: false,
-                        onSelect: { onSelectFlow($0, entry.id) },
-                        onCreateNew: { onCreateFlow(entry.id) }
-                    )
-                }
-            }
-
-            if rowState.suggestion != nil {
-                FlowLayoutCentered(spacing: DesignTokens.Spacing.sm, centered: false) {
-                    ForEach(Array(rowState.effectiveComponents.enumerated()), id: \.offset) { index, component in
-                        SuggestionComponentChip(
-                            name: component,
-                            options: componentOptions(for: rowState, excluding: component),
-                            emphasized: false,
-                            onSelect: { onSelectComponent($0, index, entry.id) },
-                            onEditCustom: { onEditComponent(index, entry.id) },
-                            onRemove: { onRemoveComponent(index, entry.id) }
-                        )
-                    }
-                    SuggestionAddComponentButton {
-                        onCreateComponent(entry.id)
-                    }
-                }
-            }
-        }
-    }
-
-    private func metaChip(label: String, value: String) -> some View {
-        HStack(spacing: 4) {
-            Text(label)
-                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-            Text(value)
-                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
-        }
-        .font(.snipsnap(.caption))
-        .padding(.horizontal, DesignTokens.Spacing.sm)
-        .padding(.vertical, 3)
-        .background(
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .fill(DesignTokens.Color.listSelectionFill.swiftUI)
+    private func committedProjectDropdown(for entry: CaptureEntry, isReadOnly: Bool) -> some View {
+        let project = committedProjectTag(for: entry)
+        TagKindDropdown(
+            kind: .project,
+            selected: project?.name ?? "None",
+            options: projectOptions,
+            isReadOnly: isReadOnly,
+            onRemove: isReadOnly
+                ? nil
+                : project.map { tag in { onRemoveTag(entry, tag) } },
+            onSelect: { name in
+                guard !isReadOnly else { return }
+                if let project, name.caseInsensitiveCompare(project.name) == .orderedSame { return }
+                onReplaceTag(entry, project ?? CaptureTag(kind: .project, name: name), name)
+            },
+            onCreateNew: { onCreateProject(entry.id) }
         )
     }
 
-    private func projectOptions(for rowState: CaptureRowSuggestionState) -> [String] {
-        var names = Set(CaptureLibraryOrganizer.existingProjectNames())
-        if let effective = rowState.effectiveProject {
-            names.insert(effective)
-        }
-        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    @ViewBuilder
+    private func committedFlowDropdown(
+        for entry: CaptureEntry,
+        rowState: CaptureRowSuggestionState,
+        isReadOnly: Bool
+    ) -> some View {
+        let flow = committedFlowTag(for: entry)
+        TagKindDropdown(
+            kind: .flow,
+            selected: flow?.name ?? "None",
+            options: flowOptions(for: entry, rowState: rowState),
+            isReadOnly: isReadOnly,
+            onRemove: isReadOnly
+                ? nil
+                : flow.map { tag in { onRemoveTag(entry, tag) } },
+            onSelect: { name in
+                guard !isReadOnly else { return }
+                if let flow, name.caseInsensitiveCompare(flow.name) == .orderedSame { return }
+                onReplaceTag(entry, flow ?? CaptureTag(kind: .flow, name: name), name)
+            },
+            onCreateNew: { onCreateFlow(entry.id) }
+        )
     }
 
-    private func flowOptions(for rowState: CaptureRowSuggestionState) -> [String] {
+    private func committedProjectTag(for entry: CaptureEntry) -> CaptureTag? {
+        if let tag = entry.tags.first(where: { $0.kind == .project }) {
+            return tag
+        }
+        guard let project = CaptureLibraryProject.currentName(for: entry) else { return nil }
+        return CaptureTag(id: entry.id, kind: .project, name: project)
+    }
+
+    private func committedFlowTag(for entry: CaptureEntry) -> CaptureTag? {
+        entry.tags.first(where: { $0.kind == .flow })
+    }
+
+    private func flowOptions(for entry: CaptureEntry, rowState: CaptureRowSuggestionState) -> [String] {
         var names = Set(CaptureLibraryOrganizer.existingTagNames(kind: .flow))
         if let effective = rowState.effectiveFlow {
             names.insert(effective)
         }
-        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    private func componentOptions(for rowState: CaptureRowSuggestionState, excluding: String) -> [String] {
-        var names = Set(CaptureLibraryOrganizer.existingTagNames(kind: .component))
-        names.formUnion(CaptureUIComponentVocabulary.common)
-        names.formUnion(rowState.effectiveComponents)
-        names = names.filter { $0.caseInsensitiveCompare(excluding) != .orderedSame }
+        for tag in entry.tags where tag.kind == .flow {
+            names.insert(tag.name)
+        }
         return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     @ViewBuilder
     private func trailingActions(for entry: CaptureEntry, rowState: CaptureRowSuggestionState) -> some View {
         if rowState.isLoading {
-            ProgressView()
-                .controlSize(.small)
-                .frame(width: 18, height: 18)
+            RabbitHopLoader(size: .compact)
+                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
+                .help("Auto-tagging…")
         } else if rowState.suggestion != nil {
             HStack(spacing: 6) {
                 Button {
@@ -1697,6 +1867,13 @@ private struct CaptureMultiSelectPane: View {
     }
 }
 
+private enum AutoTagSuggestionPhase: Equatable {
+    case idle
+    case presented
+    case accepting
+    case rejecting
+}
+
 private struct CapturePreviewPane: View {
     let entry: CaptureEntry
     @ObservedObject var sessionState: CaptureLibrarySessionState
@@ -1704,35 +1881,42 @@ private struct CapturePreviewPane: View {
     let onAutoTag: () -> Void
     let onAcceptSuggestion: () -> Void
     let onDismissSuggestion: () -> Void
+    let onSelectName: (String) -> Void
     let onSelectProject: (String) -> Void
     let onCreateProject: () -> Void
     let onSelectFlow: (String) -> Void
     let onCreateFlow: () -> Void
-    let onSelectComponent: (String, Int) -> Void
-    let onRemoveComponent: (Int) -> Void
-    let onCreateComponent: () -> Void
-    let onEditComponent: (Int) -> Void
     let onClearProject: () -> Void
+    let onClearFlow: () -> Void
     let onRemoveTag: (CaptureTag) -> Void
-    let onAddTag: (CaptureTagKind, String) -> Void
+    let onReplaceTag: (CaptureTag, String) -> Void
 
+    @Namespace private var suggestionNamespace
+    @State private var suggestionPhase: AutoTagSuggestionPhase = .idle
+    @State private var pendingDisplayProject: String?
+    @State private var pendingDisplayFlow: String?
     @State private var fullScreenshot: NSImage?
     @State private var loadTask: Task<Void, Never>?
+    @State private var suggestionAnimationTask: Task<Void, Never>?
 
     private var rowState: CaptureRowSuggestionState {
         sessionState.rowStates[entry.id] ?? CaptureRowSuggestionState()
     }
 
-    private var showsAutoTagOverlay: Bool {
-        rowState.isLoading || rowState.suggestion != nil
+    private var showsSuggestionRow: Bool {
+        rowState.suggestion != nil
+            && (suggestionPhase == .presented || suggestionPhase == .rejecting)
+    }
+
+    private var isSuggestionBusy: Bool {
+        rowState.isLoading
+            || suggestionPhase == .presented
+            || suggestionPhase == .accepting
+            || suggestionPhase == .rejecting
     }
 
     private var projectOptions: [String] {
-        var names = Set(CaptureLibraryOrganizer.existingProjectNames())
-        if let effective = rowState.effectiveProject {
-            names.insert(effective)
-        }
-        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        CaptureLibraryOrganizer.existingProjectNames()
     }
 
     private var flowOptions: [String] {
@@ -1740,180 +1924,355 @@ private struct CapturePreviewPane: View {
         if let effective = rowState.effectiveFlow {
             names.insert(effective)
         }
+        if let pendingDisplayFlow {
+            names.insert(pendingDisplayFlow)
+        }
         return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private func componentOptions(excluding: String) -> [String] {
-        var names = Set(CaptureLibraryOrganizer.existingTagNames(kind: .component))
-        names.formUnion(CaptureUIComponentVocabulary.common)
-        names.formUnion(rowState.effectiveComponents)
-        names = names.filter { $0.caseInsensitiveCompare(excluding) != .orderedSame }
-        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    /// Existing name / project / flow stay visible but non-editable while a suggestion is up.
+    private var isExistingReadOnly: Bool {
+        suggestionPhase != .idle
+    }
+
+    private var suggestionInsertAnimation: Animation {
+        .spring(response: 0.38, dampingFraction: 0.86)
+    }
+
+    private var suggestionAcceptAnimation: Animation {
+        .spring(response: 0.42, dampingFraction: 0.84)
+    }
+
+    private var suggestionRejectAnimation: Animation {
+        .easeOut(duration: 0.28)
     }
 
     var body: some View {
-        ZStack {
-            DesignTokens.Color.background.swiftUI
+        VStack(alignment: .leading, spacing: 0) {
+            // Name | project | flow | Auto-Tag columns — suggestion row
+            // mirrors the same columns so rename/project/flow/actions line up.
+            Grid(alignment: .leading, horizontalSpacing: DesignTokens.Spacing.sm, verticalSpacing: DesignTokens.Spacing.sm) {
+                GridRow(alignment: .center) {
+                    Text(entry.displayName)
+                        .font(.snipsnap(.caption))
+                        .foregroundStyle(
+                            isExistingReadOnly
+                                ? DesignTokens.Color.textSecondary.swiftUI
+                                : DesignTokens.Color.textPrimary.swiftUI
+                        )
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .gridCellAnchor(.leading)
+                        .transaction { $0.animation = nil }
 
-            VStack(spacing: 0) {
-                VStack(spacing: DesignTokens.Spacing.md) {
-                    previewContent
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    committedProjectDropdown
+                    committedFlowDropdown
+                    autoTagButton
+                        .gridColumnAlignment(.trailing)
+                }
 
-                    if !showsAutoTagOverlay {
-                        Button {
-                            onAutoTag()
-                        } label: {
-                            Label("Auto-Tag", systemImage: "sparkles")
-                        }
-                        .buttonStyle(.snipsnap)
+                if showsSuggestionRow, rowState.suggestion != nil {
+                    GridRow(alignment: .center) {
+                        suggestionNameCell
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        suggestionProjectCell
+                        suggestionFlowCell
+                        suggestionDecisionButtons
+                            .gridColumnAlignment(.trailing)
                     }
-
-                    CaptureTagBar(
-                        tags: displayTags,
-                        onRemoveTag: onRemoveTag,
-                        onAddTag: onAddTag
+                    .scaleEffect(suggestionPhase == .rejecting ? 0.9 : 1, anchor: .top)
+                    .opacity(suggestionPhase == .rejecting ? 0 : 1)
+                    .blur(radius: suggestionPhase == .rejecting ? 5 : 0)
+                    .transition(
+                        .asymmetric(
+                            insertion: .move(edge: .top).combined(with: .opacity),
+                            removal: .identity
+                        )
                     )
-                    .frame(maxWidth: 420)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.horizontal, DesignTokens.Spacing.xl)
-                .padding(.top, DesignTokens.Spacing.lg)
-                .padding(.bottom, DesignTokens.Spacing.md)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Divider()
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.displayName)
-                            .font(.snipsnap(.bodyEmphasized))
-                        Text(entry.createdAt.compactRelativeLabel)
-                            .font(.snipsnap(.caption))
-                            .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
-                    }
-
-                    Spacer()
-
-                    Button("Annotate") {
-                        onOpen(entry)
-                    }
-                    .buttonStyle(.snipsnapProminent)
-                    .keyboardShortcut(.return, modifiers: [])
-                }
-                .padding(DesignTokens.Spacing.lg)
-                .fixedSize(horizontal: false, vertical: true)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, CaptureLibraryChrome.windowEdgeInset)
+            .padding(.trailing, CaptureLibraryChrome.windowEdgeInset)
+            .padding(.top, CaptureLibraryChrome.topChromeInset)
+            .padding(.bottom, DesignTokens.Spacing.md)
 
-            if showsAutoTagOverlay {
-                autoTagOverlay
-                    .transition(.opacity)
-            }
+            previewContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .padding(.horizontal, CaptureLibraryChrome.windowEdgeInset)
+
+            actionFooter
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, CaptureLibraryChrome.windowEdgeInset)
+                .padding(.trailing, CaptureLibraryChrome.windowEdgeInset)
+                .padding(.vertical, CaptureLibraryChrome.windowEdgeInset)
         }
-        .animation(.easeInOut(duration: 0.2), value: showsAutoTagOverlay)
+        .background(DesignTokens.Color.background.swiftUI)
+        .animation(suggestionInsertAnimation, value: showsSuggestionRow)
         .animation(.easeInOut(duration: 0.2), value: rowState.isLoading)
         .onAppear {
+            syncSuggestionPhaseFromRowState()
             loadPreviewIfNeeded()
         }
         .onChange(of: entry.id) { _, _ in
+            resetSuggestionAnimationState()
             loadPreviewIfNeeded()
+        }
+        .onChange(of: rowState.suggestion != nil) { _, hasSuggestion in
+            handleSuggestionPresenceChange(hasSuggestion)
         }
         .onDisappear {
             loadTask?.cancel()
             loadTask = nil
+            suggestionAnimationTask?.cancel()
+            suggestionAnimationTask = nil
+        }
+    }
+
+    private var autoTagButton: some View {
+        Button {
+            onAutoTag()
+        } label: {
+            AutoTagButtonLabel(isLoading: rowState.isLoading)
+        }
+        .buttonStyle(.snipsnap)
+        .fixedSize()
+        .allowsHitTesting(!isSuggestionBusy)
+        .help(rowState.isLoading ? "Auto-tagging…" : "Auto-Tag")
+    }
+
+    private var committedProjectTag: CaptureTag? {
+        displayTags.first(where: { $0.kind == .project })
+    }
+
+    private var committedFlowTag: CaptureTag? {
+        displayTags.first(where: { $0.kind == .flow })
+    }
+
+    private var headerProjectName: String {
+        pendingDisplayProject ?? committedProjectTag?.name ?? "None"
+    }
+
+    private var headerFlowName: String {
+        pendingDisplayFlow ?? committedFlowTag?.name ?? "None"
+    }
+
+    @ViewBuilder
+    private var committedProjectDropdown: some View {
+        let project = committedProjectTag
+        let dropdown = TagKindDropdown(
+            kind: .project,
+            selected: headerProjectName,
+            options: projectOptions,
+            isReadOnly: isExistingReadOnly,
+            onRemove: isExistingReadOnly
+                ? nil
+                : project.map { tag in { onRemoveTag(tag) } },
+            onSelect: { name in
+                guard !isExistingReadOnly else { return }
+                if let project, name.caseInsensitiveCompare(project.name) == .orderedSame { return }
+                onReplaceTag(project ?? CaptureTag(kind: .project, name: name), name)
+            },
+            onCreateNew: onCreateProject
+        )
+
+        if suggestionPhase == .accepting, pendingDisplayProject != nil {
+            dropdown
+                .matchedGeometryEffect(id: "autoTag-project", in: suggestionNamespace)
+        } else {
+            dropdown
         }
     }
 
     @ViewBuilder
-    private var autoTagOverlay: some View {
-        ZStack {
-            Color.white.opacity(0.92)
+    private var committedFlowDropdown: some View {
+        let flow = committedFlowTag
+        let dropdown = TagKindDropdown(
+            kind: .flow,
+            selected: headerFlowName,
+            options: flowOptions,
+            isReadOnly: isExistingReadOnly,
+            onRemove: isExistingReadOnly
+                ? nil
+                : flow.map { tag in { onRemoveTag(tag) } },
+            onSelect: { name in
+                guard !isExistingReadOnly else { return }
+                if let flow, name.caseInsensitiveCompare(flow.name) == .orderedSame { return }
+                onReplaceTag(flow ?? CaptureTag(kind: .flow, name: name), name)
+            },
+            onCreateNew: onCreateFlow
+        )
 
-            if rowState.isLoading {
-                ProgressView()
-                    .controlSize(.large)
-            } else if let suggestion = rowState.suggestion {
-                VStack(spacing: DesignTokens.Spacing.md) {
-                    if suggestion.hasRename, let name = suggestion.suggestedName {
-                        VStack(spacing: DesignTokens.Spacing.xs) {
-                            Text("Rename")
-                                .font(.snipsnap(.caption))
-                                .foregroundStyle(DesignTokens.Color.textTertiary.swiftUI)
-                            Text(name)
-                                .font(.snipsnap(.bodyEmphasized))
-                                .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
-
-                    if suggestion.hasTags
-                        || rowState.showsProjectPicker
-                        || rowState.showsFlowPicker
-                        || rowState.showsComponents
-                        || suggestion.hasRename {
-                        FlowLayoutCentered(spacing: DesignTokens.Spacing.sm) {
-                            if rowState.showsProjectPicker, let project = rowState.effectiveProject {
-                                SuggestionTagMenu(
-                                    kind: .project,
-                                    selected: project,
-                                    options: projectOptions,
-                                    emphasized: true,
-                                    onRemove: onClearProject,
-                                    onSelect: onSelectProject,
-                                    onCreateNew: onCreateProject
-                                )
-                            }
-                            if rowState.showsFlowPicker, let flow = rowState.effectiveFlow {
-                                SuggestionTagMenu(
-                                    kind: .flow,
-                                    selected: flow,
-                                    options: flowOptions,
-                                    emphasized: true,
-                                    onSelect: onSelectFlow,
-                                    onCreateNew: onCreateFlow
-                                )
-                            }
-                            ForEach(Array(rowState.effectiveComponents.enumerated()), id: \.offset) { index, component in
-                                SuggestionComponentChip(
-                                    name: component,
-                                    options: componentOptions(excluding: component),
-                                    emphasized: true,
-                                    onSelect: { onSelectComponent($0, index) },
-                                    onEditCustom: { onEditComponent(index) },
-                                    onRemove: { onRemoveComponent(index) }
-                                )
-                            }
-                            if rowState.suggestion != nil {
-                                SuggestionAddComponentButton(onAdd: onCreateComponent)
-                            }
-                        }
-                        .frame(maxWidth: 360)
-                    } else if !suggestion.hasRename {
-                        Text("No tags suggested")
-                            .font(.snipsnap(.caption))
-                            .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
-                    }
-
-                    HStack(spacing: DesignTokens.Spacing.sm) {
-                        Button {
-                            onAcceptSuggestion()
-                        } label: {
-                            Label("Confirm", systemImage: "checkmark")
-                        }
-                        .buttonStyle(.snipsnapProminent)
-
-                        Button {
-                            onDismissSuggestion()
-                        } label: {
-                            Label("Reject", systemImage: "xmark")
-                        }
-                        .buttonStyle(.snipsnap)
-                    }
-                }
-                .padding(DesignTokens.Spacing.xl)
-            }
+        if suggestionPhase == .accepting, pendingDisplayFlow != nil {
+            dropdown
+                .matchedGeometryEffect(id: "autoTag-flow", in: suggestionNamespace)
+        } else {
+            dropdown
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var actionFooter: some View {
+        HStack {
+            Spacer(minLength: 0)
+            Button("Annotate") {
+                onOpen(entry)
+            }
+            .buttonStyle(.snipsnapProminent)
+            .keyboardShortcut(.return, modifiers: [])
+            .disabled(suggestionPhase == .accepting || suggestionPhase == .rejecting)
+        }
+    }
+
+    @ViewBuilder
+    private var suggestionNameCell: some View {
+        if rowState.showsNameEditor, let name = rowState.effectiveName {
+            SuggestedNameField(name: name, onCommit: onSelectName)
+        } else if !rowState.showsProjectPicker && !rowState.showsFlowPicker {
+            Text("No tags suggested")
+                .font(.snipsnap(.caption))
+                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+        } else {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private var suggestionProjectCell: some View {
+        if rowState.showsProjectPicker {
+            TagKindDropdown(
+                kind: .project,
+                selected: rowState.effectiveProject ?? "None",
+                options: projectOptions,
+                onRemove: rowState.effectiveProject == nil
+                    ? nil
+                    : onClearProject,
+                onSelect: onSelectProject,
+                onCreateNew: onCreateProject
+            )
+            .matchedGeometryEffect(id: "autoTag-project", in: suggestionNamespace)
+        } else {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    @ViewBuilder
+    private var suggestionFlowCell: some View {
+        if rowState.showsFlowPicker {
+            TagKindDropdown(
+                kind: .flow,
+                selected: rowState.effectiveFlow ?? "None",
+                options: flowOptions,
+                onRemove: rowState.effectiveFlow == nil
+                    ? nil
+                    : onClearFlow,
+                onSelect: onSelectFlow,
+                onCreateNew: onCreateFlow
+            )
+            .matchedGeometryEffect(id: "autoTag-flow", in: suggestionNamespace)
+        } else {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var suggestionDecisionButtons: some View {
+        HStack(spacing: DesignTokens.Spacing.sm) {
+            Button {
+                confirmSuggestion()
+            } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.snipsnap)
+            .fixedSize()
+            .disabled(suggestionPhase != .presented)
+            .help("Accept suggestion")
+
+            Button {
+                rejectSuggestion()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(.snipsnap)
+            .fixedSize()
+            .disabled(suggestionPhase != .presented)
+            .help("Dismiss suggestion")
+        }
+    }
+
+    private func handleSuggestionPresenceChange(_ hasSuggestion: Bool) {
+        if hasSuggestion {
+            guard suggestionPhase == .idle else { return }
+            withAnimation(suggestionInsertAnimation) {
+                suggestionPhase = .presented
+            }
+        } else if suggestionPhase == .presented || suggestionPhase == .rejecting {
+            suggestionPhase = .idle
+            pendingDisplayProject = nil
+            pendingDisplayFlow = nil
+        }
+    }
+
+    private func syncSuggestionPhaseFromRowState() {
+        if rowState.suggestion != nil, suggestionPhase == .idle {
+            suggestionPhase = .presented
+        }
+    }
+
+    private func resetSuggestionAnimationState() {
+        suggestionAnimationTask?.cancel()
+        suggestionAnimationTask = nil
+        suggestionPhase = rowState.suggestion != nil ? .presented : .idle
+        pendingDisplayProject = nil
+        pendingDisplayFlow = nil
+    }
+
+    private func confirmSuggestion() {
+        guard suggestionPhase == .presented else { return }
+
+        pendingDisplayProject = rowState.showsProjectPicker
+            ? (rowState.effectiveProject ?? "None")
+            : nil
+        pendingDisplayFlow = rowState.showsFlowPicker
+            ? (rowState.effectiveFlow ?? "None")
+            : nil
+
+        withAnimation(suggestionAcceptAnimation) {
+            suggestionPhase = .accepting
+        }
+
+        suggestionAnimationTask?.cancel()
+        suggestionAnimationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(420))
+            guard !Task.isCancelled else { return }
+            onAcceptSuggestion()
+            pendingDisplayProject = nil
+            pendingDisplayFlow = nil
+            suggestionPhase = .idle
+        }
+    }
+
+    private func rejectSuggestion() {
+        guard suggestionPhase == .presented else { return }
+
+        withAnimation(suggestionRejectAnimation) {
+            suggestionPhase = .rejecting
+        }
+
+        suggestionAnimationTask?.cancel()
+        suggestionAnimationTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled else { return }
+            onDismissSuggestion()
+            suggestionPhase = .idle
+        }
     }
 
     /// Prefer persisted tags; always surface the folder-derived project when one is missing.
@@ -1948,8 +2307,13 @@ private struct CapturePreviewPane: View {
             }
 
         case .recording(let url, _):
-            VideoPreviewRepresentable(url: url)
-                .aspectRatio(entry.thumbnail.size.width / max(entry.thumbnail.size.height, 1), contentMode: .fit)
+            // Manifest path wins — rename used to leave entry.item pointing at a moved-away file.
+            let resolved = CaptureHistory.shared.fileURL(for: entry.id)
+                ?? CaptureHistory.shared.storedFileURL(for: entry.id)
+                ?? url
+            RecordingTimelinePreviewRepresentable(url: resolved)
+                .id(resolved.path)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -2013,68 +2377,3 @@ private struct FlowLayoutCentered: Layout {
     }
 }
 
-private struct VideoPreviewRepresentable: NSViewRepresentable {
-    let url: URL
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = LibraryPreviewPlayerView()
-        // Avoid AVKit Tahoe bug: inline glass volume controls have unsatisfiable width constraints.
-        view.controlsStyle = .floating
-        view.videoGravity = .resizeAspect
-        context.coordinator.bind(url: url, to: view)
-        return view
-    }
-
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {
-        context.coordinator.bind(url: url, to: nsView)
-        (nsView as? LibraryPreviewPlayerView)?.applyWindowBackgroundLetterbox()
-    }
-
-    final class Coordinator {
-        private var currentURL: URL?
-
-        func bind(url: URL, to view: AVPlayerView) {
-            guard currentURL != url else { return }
-            currentURL = url
-            view.player = AVPlayer(url: url)
-        }
-    }
-}
-
-/// AVPlayerView letterboxes with an opaque black fill by default; match the library window instead.
-private final class LibraryPreviewPlayerView: AVPlayerView {
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        videoGravity = .resizeAspect
-        applyWindowBackgroundLetterbox()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layout() {
-        super.layout()
-        applyWindowBackgroundLetterbox()
-    }
-
-    func applyWindowBackgroundLetterbox() {
-        let fill = DesignTokens.Color.background.ns.cgColor
-        layer?.backgroundColor = fill
-        applyLetterboxFill(fill, to: layer)
-    }
-
-    private func applyLetterboxFill(_ fill: CGColor, to layer: CALayer?) {
-        guard let layer else { return }
-        if layer is AVPlayerLayer {
-            layer.backgroundColor = fill
-        }
-        layer.sublayers?.forEach { applyLetterboxFill(fill, to: $0) }
-    }
-}

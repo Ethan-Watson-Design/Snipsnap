@@ -6,11 +6,11 @@
 	<dict>
 		<key>Resources/AppIcon.icns</key>
 		<data>
-		ah9I5jD2dtlVrTvkcYVDwoKquCQ=
+		ewk6b1wjLM/v6tjQYBaL/75E38o=
 		</data>
 		<key>Resources/Assets.car</key>
 		<data>
-		JUZUGlZPFAOEhNvTr2KAAdxgwl8=
+		TjL4+O7iICbrDYTtK5+ivlVByMw=
 		</data>
 		<key>Resources/Geist-Bold.ttf</key>
 		<data>
@@ -47,7 +47,7 @@
 		<dict>
 			<key>cdhash</key>
 			<data>
-			bTMV6D2CWOUCd2egS6CG8AVfhbU=
+			+eIlYYq7e/psUp3NnUx19aLF/+Y=
 			</data>
 			<key>requirement</key>
 			<string>identifier "Snipsnap.debug" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: ethanwatsonj88@gmail.com (556ZG447JB)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>
@@ -65,14 +65,14 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			3OmGeCnPODTGHLh9HJLc+U4GW//Fug7FZEo9WQFDSL4=
+			i6uxiWagFFTGtdi/zdn0Z7aufMPimm/2YQkK6bPq8no=
 			</data>
 		</dict>
 		<key>Resources/Assets.car</key>
 		<dict>
 			<key>hash2</key>
 			<data>
-			ytgBeNTYUj69O1fmexrsh/3vrEVl6MVUPOlvVi3NTm0=
+			jySpepR1Q4gqsx7AQlBBaoiMHbR4wfrNQ/0CkxtuX8o=
 			</data>
 		</dict>
 		<key>Resources/Geist-Bold.ttf</key>

@@ -13,6 +13,13 @@
     "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AnnotationWindow.o",
     "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AnnotationWindow.swiftdeps"
   },
+  "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/AutoOrganizer.swift" : {
+    "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AutoOrganizer.swiftconstvalues",
+    "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AutoOrganizer.d",
+    "diagnostics" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AutoOrganizer.dia",
+    "object" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AutoOrganizer.o",
+    "swift-dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/AutoOrganizer.swiftdeps"
+  },
   "/Users/ethanwatson/CustomApps/Snipsnap/Snipsnap/CaptureBar.swift" : {
     "const-values" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureBar.swiftconstvalues",
     "dependencies" : "/Users/ethanwatson/CustomApps/Snipsnap/.build/Build/Intermediates.noindex/Snipsnap.build/Debug/Snipsnap.build/Objects-normal/arm64/CaptureBar.d",

@@ -3,10 +3,12 @@
 //  Snipsnap
 //
 //  Single source of truth for color, spacing, radius, type, and elevation.
-//  Colors: `Palette` holds 10-tint scales (100–1000); `Color` maps semantics.
+//  Colors: `Color` = semantics (roles); `Palette` = primitives (10-tint scales).
+//  Neutral replaces gray. Prefer `Color.*` in UI; reach into `Palette` only
+//  when defining a new semantic or a one-off tint that isn’t named yet.
 //  Floating panels (Capture Bar, toast, annotation chrome) lean Figma: small
 //  radii, soft directional shadows, primary blue used sparingly.
-//  Content surfaces (Settings, Capture Library) lean Notion: neutral grays,
+//  Content surfaces (Settings, Capture Library) lean Notion: neutral fills,
 //  generous whitespace, restrained type, primary only on the main action.
 //
 
@@ -148,85 +150,76 @@ enum DesignTokens {
         static let xxl: CGFloat = 32
     }
 
-    // MARK: Color
+    // MARK: Color (semantics)
 
+    /// Role-based colors. Each maps to a `Palette` tint (or alpha over one).
     enum Color {
-        // Semantic — system colors, dark-mode-safe by default.
+        // MARK: Surfaces
 
-        /// Content window fill (View All, Settings). Light `#F4F4F4`, dark near-black.
-        static let background = dynamicNeutralSurface(light: 244.0 / 255.0, dark: 0.12)
-        static var surface: TokenColor { TokenColor(ns: .controlColor) }
-        static var surfaceElevated: TokenColor { TokenColor(ns: .controlBackgroundColor) }
-        static var border: TokenColor { TokenColor(ns: .separatorColor) }
-        static var textPrimary: TokenColor { TokenColor(ns: .labelColor) }
-        static var textSecondary: TokenColor { TokenColor(ns: .secondaryLabelColor) }
-        static var textTertiary: TokenColor { TokenColor(ns: .tertiaryLabelColor) }
+        /// Content window fill (View All, Settings).
+        static let background = dynamicNeutral(.t200, .t1000)
+        /// Nested / control surface.
+        static let surface = dynamicNeutral(.t100, .t900)
+        /// Raised content surface (cards, fields).
+        static let surfaceElevated = dynamicNeutral(.t100, .t800)
+        /// Floating / elevated panel surface (toast, annotation chrome).
+        static let panelSurface = dynamicNeutral(.t100, .t900)
+        /// Selected list / nav / chip fill.
+        static let listSelectionFill = dynamicNeutral(.t400, .t800)
+        /// Soft bordered control fill (Group by, Auto-Tag, project/flow dropdowns).
+        static let softControlFill = Palette.neutral[.t100]
+        /// Hover / pressed variant of `softControlFill`.
+        static let softControlFillHovered = Palette.neutral[.t200]
+        /// Hover fill on dark HUD chrome (Capture Bar mode buttons).
+        static let panelHoverFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.10))
+        /// Active fill on dark HUD chrome.
+        static let panelActiveFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.14))
 
-        /// Hover / active fills on dark HUD chrome (Capture Bar mode buttons).
-        static let panelHoverFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.10))
-        static let panelActiveFill = TokenColor(ns: NSColor.white.withAlphaComponent(0.14))
+        // MARK: Borders
 
-        /// Selected list / nav / chip fill. Light L=86, dark L=28.
-        static let listSelectionFill = dynamicNeutralSurface(light: 0.86, dark: 0.28)
+        static let border = dynamicNeutral(.t300, .t700)
+        /// Soft control outline (Group by, Auto-Tag, project/flow dropdowns) — one step darker than `border`.
+        static let softControlBorder = dynamicNeutral(.t400, .t800)
+        /// Dividers on `panelSurface`.
+        static let borderOnPanel = dynamicNeutralAlpha(
+            light: Palette.neutral[.t1000].ns.withAlphaComponent(0.12),
+            dark: Palette.neutral[.t100].ns.withAlphaComponent(0.12)
+        )
+        /// Dividers on `primary` surfaces.
+        static let borderOnPrimary = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.18))
 
-        /// Neutral surface at HSL lightness (achromatic). AppKit HSB brightness matches HSL L when S=0.
-        static func neutralSurface(lightness: CGFloat) -> TokenColor {
-            TokenColor(ns: NSColor(calibratedHue: 0, saturation: 0, brightness: lightness, alpha: 1))
-        }
+        // MARK: Text
 
-        /// Appearance-aware neutral surface (content windows follow system light/dark).
-        static func dynamicNeutralSurface(light: CGFloat, dark: CGFloat) -> TokenColor {
-            TokenColor(ns: NSColor(name: nil, dynamicProvider: { appearance in
-                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                return NSColor(
-                    calibratedHue: 0,
-                    saturation: 0,
-                    brightness: isDark ? dark : light,
-                    alpha: 1
-                )
-            }))
-        }
+        static let textPrimary = dynamicNeutral(.t1000, .t100)
+        static let textSecondary = dynamicNeutral(.t600, .t400)
+        static let textTertiary = dynamicNeutral(.t500, .t500)
+        /// Icons and labels on `primary` surfaces.
+        static let textOnPrimary = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.92))
 
-        private static func dynamicAlphaFill(light: NSColor, dark: NSColor) -> TokenColor {
-            TokenColor(ns: NSColor(name: nil, dynamicProvider: { appearance in
-                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
-            }))
-        }
+        // MARK: Brand / accents
 
         /// Brand primary — blue 700. Buttons, focus, interactive emphasis.
         static let primary = Palette.blue[.t700]
-
-        /// Icons and labels on `primary` surfaces.
-        static let textOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.92))
-
-        /// Dividers on `primary` surfaces.
-        static let borderOnPrimary = TokenColor(ns: NSColor.white.withAlphaComponent(0.18))
-
-        /// Floating / elevated panel surface. Light L=97, dark L=18.
-        static let panelSurface = dynamicNeutralSurface(light: 0.97, dark: 0.18)
-
-        /// Dividers on `panelSurface`.
-        static let borderOnPanel = dynamicAlphaFill(
-            light: NSColor.black.withAlphaComponent(0.12),
-            dark: NSColor.white.withAlphaComponent(0.12)
+        /// Region capture overlay border and handles.
+        static let regionSelectionAccent = TokenColor(
+            ns: Palette.neutral[.t500].ns.withAlphaComponent(0.55)
         )
 
-        /// Region capture overlay border and handles.
-        static let regionSelectionAccent = TokenColor(ns: NSColor(calibratedWhite: 0.72, alpha: 0.55))
+        // MARK: Recording gradients
 
         /// Preset recording-background gradients. Single source for Ship It + renderer.
         enum RecordingGradient {
             static let warm = TokenGradient(ns: [
-                NSColor(red: 0.98, green: 0.72, blue: 0.45, alpha: 1),
-                NSColor(red: 0.92, green: 0.38, blue: 0.55, alpha: 1),
+                Palette.tangerine[.t400].ns,
+                Palette.flamingo[.t600].ns,
             ])
             static let cool = TokenGradient(ns: [
-                NSColor(red: 0.35, green: 0.75, blue: 0.98, alpha: 1),
-                NSColor(red: 0.18, green: 0.42, blue: 0.92, alpha: 1),
+                Palette.peacock[.t400].ns,
+                Palette.blue[.t700].ns,
             ])
             static let midnight = TokenGradient(ns: [
-                NSColor(red: 0.12, green: 0.14, blue: 0.22, alpha: 1),
-                NSColor(red: 0.04, green: 0.05, blue: 0.10, alpha: 1),
+                Palette.blue[.t900].ns,
+                Palette.neutral[.t1000].ns,
             ])
 
             static func colors(for style: RecordingBackgroundStyle) -> TokenGradient? {
@@ -244,14 +237,30 @@ enum DesignTokens {
 
         static var annotationPaletteNS: [NSColor] { annotationPalette.map(\.ns) }
         static var annotationPaletteSwiftUI: [SwiftUI.Color] { annotationPalette.map(\.swiftUI) }
+
+        // MARK: Palette helpers
+
+        /// Appearance-aware pick from the neutral scale.
+        static func dynamicNeutral(_ light: ColorTint, _ dark: ColorTint) -> TokenColor {
+            TokenColor(ns: NSColor(name: nil, dynamicProvider: { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return Palette.neutral[isDark ? dark : light].ns
+            }))
+        }
+
+        private static func dynamicNeutralAlpha(light: NSColor, dark: NSColor) -> TokenColor {
+            TokenColor(ns: NSColor(name: nil, dynamicProvider: { appearance in
+                appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+            }))
+        }
     }
 
-    // MARK: Palette (10-tint scales)
+    // MARK: Palette (primitives)
 
     /// Primitive color ramps — 100 (lightest) → 1000 (darkest).
-    /// Use `Palette.blue[.t200]` for soft fills, `[.t700]` for brand primary, `[.t900]` for text.
+    /// Prefer defining a semantic in `Color` over using these directly in UI.
     enum Palette {
-        static let gray = TokenColorScale(name: "Gray", [
+        static let neutral = TokenColorScale(name: "Neutral", [
             0xFAFAFA, 0xF5F5F5, 0xEBEBEB, 0xE0E0E0, 0xA1A1A1,
             0x737373, 0x525252, 0x424242, 0x2A2A2A, 0x171717,
         ])
@@ -304,7 +313,7 @@ enum DesignTokens {
 
         /// All named ramps for kitchen sink / tooling.
         static let all: [TokenColorScale] = [
-            gray, blue, tomato, tangerine, gold, sage, peacock, grape, flamingo,
+            neutral, blue, tomato, tangerine, gold, sage, peacock, grape, flamingo,
         ]
     }
 
@@ -319,8 +328,8 @@ enum DesignTokens {
         static let familyName = "Geist"
         static let monoFamilyName = "Geist Mono"
 
-        static let caption = TokenFont(size: 12, weight: .regular)
-        static let label = TokenFont(size: 12, weight: .medium)
+        static let caption = TokenFont(size: 14, weight: .regular)
+        static let label = TokenFont(size: 14, weight: .medium)
         static let body = TokenFont(size: 14, weight: .medium)
         static let bodyEmphasized = TokenFont(size: 14, weight: .semibold)
         static let title = TokenFont(size: 14, weight: .semibold)
@@ -483,7 +492,8 @@ extension NSFont {
 // MARK: - Buttons
 
 /// Custom content-window button — Geist type, token colors, no AppKit chrome.
-/// Compact Vercel-like sizing: 14 pt Medium, tight padding.
+/// Compact Vercel-like sizing: 14 pt, tight padding. Secondary matches soft
+/// dropdown captions (regular); prominent stays medium.
 struct SnipsnapButtonStyle: ButtonStyle {
     enum Kind {
         /// Filled primary action (Confirm, default).
@@ -502,22 +512,31 @@ struct SnipsnapButtonStyle: ButtonStyle {
 
     @Environment(\.isEnabled) private var isEnabled
 
-    private static let labelFont = Font.custom(
-        DesignTokens.Typography.postScriptName(for: .medium),
-        size: 14
-    )
+    private var labelFont: Font {
+        Font.custom(
+            DesignTokens.Typography.postScriptName(
+                for: kind == .prominent ? .medium : .regular
+            ),
+            size: 14
+        )
+    }
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(Self.labelFont)
+            .font(labelFont)
             .foregroundStyle(foreground)
+            // Match 14pt Geist text glyph height so icon-only labels
+            // (e.g. Auto-Tag accept/reject) share the same control height.
+            .frame(minHeight: 17)
             .padding(.horizontal, size == .compact ? 8 : 10)
             .padding(.vertical, size == .compact ? 2 : 4)
-            .background(background(isPressed: configuration.isPressed))
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
-            .overlay(borderOverlay)
+            .background {
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous)
+                    .fill(backgroundFill(isPressed: configuration.isPressed))
+            }
+            .overlay { borderOverlay }
             .opacity(isEnabled ? 1 : 0.4)
-            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.sm))
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous))
             .pointerStyle(.link)
     }
 
@@ -528,22 +547,22 @@ struct SnipsnapButtonStyle: ButtonStyle {
         }
     }
 
-    @ViewBuilder
-    private func background(isPressed: Bool) -> some View {
-        let pressedOpacity = isPressed ? 0.82 : 1.0
+    private func backgroundFill(isPressed: Bool) -> Color {
         switch kind {
         case .prominent:
-            DesignTokens.Color.primary.swiftUI.opacity(pressedOpacity)
+            DesignTokens.Color.primary.swiftUI.opacity(isPressed ? 0.82 : 1.0)
         case .secondary:
-            DesignTokens.Color.listSelectionFill.swiftUI.opacity(pressedOpacity)
+            isPressed
+                ? DesignTokens.Color.softControlFillHovered.swiftUI
+                : DesignTokens.Color.softControlFill.swiftUI
         }
     }
 
     @ViewBuilder
     private var borderOverlay: some View {
         if kind == .secondary {
-            RoundedRectangle(cornerRadius: DesignTokens.Radius.sm)
-                .stroke(DesignTokens.Color.border.swiftUI, lineWidth: 1)
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous)
+                .strokeBorder(DesignTokens.Color.softControlBorder.swiftUI, lineWidth: 1)
         }
     }
 }

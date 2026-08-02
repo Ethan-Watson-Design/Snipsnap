@@ -121,13 +121,18 @@ private final class CaptureBarModeButton: NSControl {
         didSet { updateLook() }
     }
 
+    private let actionTitle: String
+    private let showsLabel: Bool
     private let highlightLayer = CALayer()
+    private let recordingDotLayer = CALayer()
     private let iconView = NSImageView()
     private let labelField = NSTextField(labelWithString: "")
     private var isHovered = false
 
     init(mode: CaptureMode, sfSymbol: String, label: String) {
         self.mode = mode
+        self.actionTitle = label
+        self.showsLabel = !mode.isRecording
         super.init(frame: .zero)
         wantsLayer = true
         highlightLayer.cornerRadius = CaptureBarStyle.hoverCornerRadius
@@ -147,7 +152,15 @@ private final class CaptureBarModeButton: NSControl {
         labelField.isEditable = false
         labelField.drawsBackground = false
         labelField.isSelectable = false
+        labelField.isHidden = !showsLabel
 
+        if mode.isRecording {
+            recordingDotLayer.backgroundColor = NSColor.systemRed.cgColor
+            recordingDotLayer.cornerRadius = 3
+            layer?.addSublayer(recordingDotLayer)
+        }
+
+        setAccessibilityLabel(label)
         addSubview(iconView)
         addSubview(labelField)
         updateLook()
@@ -173,6 +186,9 @@ private final class CaptureBarModeButton: NSControl {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         updateLook()
+        if mode.isRecording {
+            ToastWindow.show(message: actionTitle)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
@@ -183,28 +199,54 @@ private final class CaptureBarModeButton: NSControl {
     override func layout() {
         super.layout()
 
-        let padTop = DesignTokens.Spacing.sm
         let iconSide: CGFloat = 18
         let gap = DesignTokens.Spacing.xs
-        let labelH: CGFloat = 12
 
-        iconView.frame = NSRect(
-            x: (bounds.width - iconSide) / 2,
-            y: bounds.height - padTop - iconSide,
-            width: iconSide,
-            height: iconSide
-        )
-        labelField.frame = NSRect(
-            x: DesignTokens.Spacing.xs,
-            y: iconView.frame.minY - gap - labelH,
-            width: bounds.width - DesignTokens.Spacing.sm,
-            height: labelH
-        )
+        if showsLabel {
+            let font = labelField.font ?? NSFont.snipsnap(.caption)
+            // Caption is 14pt — hardcoding 12 clipped glyphs at the baseline.
+            let labelH = ceil(font.ascender - font.descender + font.leading)
+            let contentH = iconSide + gap + labelH
+            let originY = max(DesignTokens.Spacing.xs, (bounds.height - contentH) / 2)
 
-        let contentRect = iconView.frame.union(labelField.frame)
-        highlightLayer.frame = contentRect
-            .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
-            .intersection(bounds.insetBy(dx: 2, dy: 2))
+            labelField.frame = NSRect(
+                x: DesignTokens.Spacing.xs,
+                y: originY,
+                width: bounds.width - DesignTokens.Spacing.sm,
+                height: labelH
+            )
+            iconView.frame = NSRect(
+                x: (bounds.width - iconSide) / 2,
+                y: labelField.frame.maxY + gap,
+                width: iconSide,
+                height: iconSide
+            )
+
+            let contentRect = iconView.frame.union(labelField.frame)
+            highlightLayer.frame = contentRect
+                .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
+                .intersection(bounds.insetBy(dx: 2, dy: 2))
+        } else {
+            iconView.frame = NSRect(
+                x: (bounds.width - iconSide) / 2,
+                y: (bounds.height - iconSide) / 2,
+                width: iconSide,
+                height: iconSide
+            )
+            highlightLayer.frame = iconView.frame
+                .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
+                .intersection(bounds.insetBy(dx: 2, dy: 2))
+        }
+
+        if mode.isRecording {
+            let dot: CGFloat = 6
+            recordingDotLayer.frame = NSRect(
+                x: iconView.frame.maxX - 2,
+                y: iconView.frame.maxY - 4,
+                width: dot,
+                height: dot
+            )
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -522,7 +564,8 @@ final class CaptureBar: NSPanel {
     private var escapeGlobalMonitor: Any?
     private var escapeLocalMonitor: Any?
 
-    private let barHeight: CGFloat = 64
+    /// Tall enough for 14pt caption labels under mode icons without clipping.
+    private let barHeight: CGFloat = 72
     private let pickerRowHeight: CGFloat = 44
     private let pickerGap: CGFloat = 6
     private weak var barEffectView: NSVisualEffectView?
@@ -568,10 +611,14 @@ final class CaptureBar: NSPanel {
                 instance = CaptureBar()
             }
             isPresented = true
-            instance?.selectedMode = .screenshotRegion
-            instance?.repositionOnScreen()
-            instance?.startEscapeMonitor()
-            instance?.makeKeyAndOrderFront(nil)
+            let bar = instance
+            bar?.selectedRegionRect = nil
+            bar?.selectedMode = .screenshotRegion
+            // Force refresh even when mode was already screenshotRegion (didSet skips).
+            bar?.refreshSelection()
+            bar?.repositionOnScreen()
+            bar?.startEscapeMonitor()
+            bar?.makeKeyAndOrderFront(nil)
         }
     }
 
@@ -585,6 +632,7 @@ final class CaptureBar: NSPanel {
         let dismiss = {
             isPresented = false
             guard let bar = instance else { return }
+            bar.selectedRegionRect = nil
             bar.stopEscapeMonitor()
             RecordingBackgroundPreviewWindow.hide()
             bar.orderOut(nil)
@@ -683,7 +731,7 @@ final class CaptureBar: NSPanel {
     private func buildUI() {
         let barH = barHeight
         let btnW:       CGFloat = 58
-        let btnH:       CGFloat = 48
+        let btnH:       CGFloat = 56
         let hPad = Self.computeBarLayout().horizontalPad
         let captureH:   CGFloat = 30
         let sepPad:     CGFloat = 8
@@ -695,14 +743,14 @@ final class CaptureBar: NSPanel {
         typealias BSpec = (CaptureMode, String, String)
         let groups: [[BSpec]] = [
             [
-                (.screenshotRegion,     "rectangle.dashed",   "Region"),
-                (.screenshotWindow,     "macwindow",          "Window"),
-                (.screenshotFullScreen, "rectangle.fill",     "Full Screen"),
+                (.screenshotFullScreen, "rectangle.fill",   "Full Screen"),
+                (.screenshotWindow,     "macwindow",        "Window"),
+                (.screenshotRegion,     "rectangle.dashed", "Region"),
             ],
             [
-                (.recordFullScreen,     "display",            "Full Screen"),
-                (.recordWindow,         "macwindow",          "Window"),
-                (.recordRegion,         "record.circle.fill", "Region"),
+                (.recordFullScreen, "rectangle.fill",   "Record Full Screen"),
+                (.recordWindow,     "macwindow",        "Record Window"),
+                (.recordRegion,     "rectangle.dashed", "Record Region"),
             ],
         ]
 
@@ -1239,6 +1287,12 @@ final class CaptureBar: NSPanel {
 
     private func applyRegionSelector() {
         if isRegionMode {
+            // Keep the same overlay (and selection) when switching between
+            // screenshot region and record region.
+            if RegionSelector.isInteractiveVisible {
+                updateCaptureButtonState()
+                return
+            }
             RegionSelector.showInteractive(initialRect: selectedRegionRect) { [weak self] rect in
                 guard let self else { return }
                 self.selectedRegionRect = rect
@@ -1246,7 +1300,6 @@ final class CaptureBar: NSPanel {
             }
         } else {
             RegionSelector.hide()
-            selectedRegionRect = nil
             updateCaptureButtonState()
         }
     }

@@ -34,6 +34,21 @@ extension DeveloperToolsSupport.ImageResource {
     /// The "MenuBarIcon" asset catalog image resource.
     static let menuBarIcon = DeveloperToolsSupport.ImageResource(name: "MenuBarIcon", bundle: resourceBundle)
 
+    /// The "RabbitHop0" asset catalog image resource.
+    static let rabbitHop0 = DeveloperToolsSupport.ImageResource(name: "RabbitHop0", bundle: resourceBundle)
+
+    /// The "RabbitHop1" asset catalog image resource.
+    static let rabbitHop1 = DeveloperToolsSupport.ImageResource(name: "RabbitHop1", bundle: resourceBundle)
+
+    /// The "RabbitHop2" asset catalog image resource.
+    static let rabbitHop2 = DeveloperToolsSupport.ImageResource(name: "RabbitHop2", bundle: resourceBundle)
+
+    /// The "RabbitHop3" asset catalog image resource.
+    static let rabbitHop3 = DeveloperToolsSupport.ImageResource(name: "RabbitHop3", bundle: resourceBundle)
+
+    /// The "RabbitHop4" asset catalog image resource.
+    static let rabbitHop4 = DeveloperToolsSupport.ImageResource(name: "RabbitHop4", bundle: resourceBundle)
+
 }
 
 // MARK: - Color Symbol Extensions -
@@ -82,6 +97,51 @@ extension AppKit.NSImage {
 #endif
     }
 
+    /// The "RabbitHop0" asset catalog image.
+    static var rabbitHop0: AppKit.NSImage {
+#if !targetEnvironment(macCatalyst)
+        .init(resource: .rabbitHop0)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop1" asset catalog image.
+    static var rabbitHop1: AppKit.NSImage {
+#if !targetEnvironment(macCatalyst)
+        .init(resource: .rabbitHop1)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop2" asset catalog image.
+    static var rabbitHop2: AppKit.NSImage {
+#if !targetEnvironment(macCatalyst)
+        .init(resource: .rabbitHop2)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop3" asset catalog image.
+    static var rabbitHop3: AppKit.NSImage {
+#if !targetEnvironment(macCatalyst)
+        .init(resource: .rabbitHop3)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop4" asset catalog image.
+    static var rabbitHop4: AppKit.NSImage {
+#if !targetEnvironment(macCatalyst)
+        .init(resource: .rabbitHop4)
+#else
+        .init()
+#endif
+    }
+
 }
 #endif
 
@@ -94,6 +154,51 @@ extension UIKit.UIImage {
     static var menuBarIcon: UIKit.UIImage {
 #if !os(watchOS)
         .init(resource: .menuBarIcon)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop0" asset catalog image.
+    static var rabbitHop0: UIKit.UIImage {
+#if !os(watchOS)
+        .init(resource: .rabbitHop0)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop1" asset catalog image.
+    static var rabbitHop1: UIKit.UIImage {
+#if !os(watchOS)
+        .init(resource: .rabbitHop1)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop2" asset catalog image.
+    static var rabbitHop2: UIKit.UIImage {
+#if !os(watchOS)
+        .init(resource: .rabbitHop2)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop3" asset catalog image.
+    static var rabbitHop3: UIKit.UIImage {
+#if !os(watchOS)
+        .init(resource: .rabbitHop3)
+#else
+        .init()
+#endif
+    }
+
+    /// The "RabbitHop4" asset catalog image.
+    static var rabbitHop4: UIKit.UIImage {
+#if !os(watchOS)
+        .init(resource: .rabbitHop4)
 #else
         .init()
 #endif

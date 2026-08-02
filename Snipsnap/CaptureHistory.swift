@@ -142,16 +142,16 @@ extension Date {
         if seconds < 60 { return "just now" }
 
         let minutes = Int(seconds / 60)
-        if minutes < 60 { return "\(minutes)min ago" }
+        if minutes < 60 { return "\(minutes)min" }
 
         let hours = minutes / 60
-        if hours < 24 { return "\(hours)h ago" }
+        if hours < 24 { return "\(hours)h" }
 
         let days = hours / 24
-        if days < 7 { return "\(days)d ago" }
+        if days < 7 { return "\(days)d" }
 
         let weeks = days / 7
-        if weeks < 5 { return "\(weeks)w ago" }
+        if weeks < 5 { return "\(weeks)w" }
 
         let calendar = Calendar.current
         if calendar.isDate(self, equalTo: Date(), toGranularity: .year) {
@@ -213,7 +213,8 @@ final class CaptureHistory {
             path = try container.decode(String.self, forKey: .path)
             thumbnailPath = try container.decodeIfPresent(String.self, forKey: .thumbnailPath)
             customName = try container.decodeIfPresent(String.self, forKey: .customName)
-            tags = try container.decodeIfPresent([CaptureTag].self, forKey: .tags) ?? []
+            tags = try container.decodeIfPresent([LossyCaptureTag].self, forKey: .tags)?
+                .compactMap(\.tag) ?? []
         }
     }
 
@@ -338,9 +339,14 @@ final class CaptureHistory {
         return results
     }
 
-    func fileURL(for id: UUID) -> URL? {
+    /// On-disk path from the manifest (may be temporarily unreachable during iCloud moves).
+    func storedFileURL(for id: UUID) -> URL? {
         guard let stored = storedCaptures.first(where: { $0.id == id }) else { return nil }
-        let url = URL(fileURLWithPath: stored.path)
+        return URL(fileURLWithPath: stored.path)
+    }
+
+    func fileURL(for id: UUID) -> URL? {
+        guard let url = storedFileURL(for: id) else { return nil }
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
@@ -448,10 +454,18 @@ final class CaptureHistory {
         storedCaptures[storedIndex] = updatedStored
 
         let entry = entries[entryIndex]
+        let updatedItem: CaptureItem
+        switch entry.item {
+        case .screenshot(let thumb):
+            updatedItem = .screenshot(thumb)
+        case .recording(_, let thumb):
+            // Keep the in-memory recording URL in sync — preview/annotate use it.
+            updatedItem = .recording(url: newURL, thumbnail: thumb)
+        }
         entries[entryIndex] = CaptureEntry(
             id: entry.id,
             createdAt: entry.createdAt,
-            item: entry.item,
+            item: updatedItem,
             customName: sanitized,
             tags: entry.tags
         )
@@ -607,13 +621,12 @@ final class CaptureHistory {
         }
     }
 
-    /// Replaces non-project tags (and optionally upserts project) from an Auto-Tag accept batch.
+    /// Upserts project/flow tags from an Auto-Tag accept batch.
     @discardableResult
     func applyTagSuggestion(
         id: UUID,
         project: String?,
-        flow: String?,
-        components: [String]
+        flow: String?
     ) -> Bool {
         var ok = true
 
@@ -623,10 +636,6 @@ final class CaptureHistory {
 
         if let flow {
             _ = addTag(id: id, kind: .flow, name: flow)
-        }
-
-        for component in components {
-            _ = addTag(id: id, kind: .component, name: component)
         }
 
         return ok

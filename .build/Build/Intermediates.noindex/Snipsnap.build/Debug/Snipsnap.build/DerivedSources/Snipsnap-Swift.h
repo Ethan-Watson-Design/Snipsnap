@@ -482,6 +482,8 @@ SWIFT_CLASS("_TtC8Snipsnap20CaptureLibraryWindow")
 - (nonnull instancetype)init SWIFT_UNAVAILABLE;
 + (nonnull instancetype)new SWIFT_UNAVAILABLE_MSG("-init is unavailable");
 - (void)windowWillClose:(NSNotification * _Nonnull)notification;
+- (void)windowDidBecomeKey:(NSNotification * _Nonnull)notification;
+- (void)windowDidResize:(NSNotification * _Nonnull)notification;
 - (nonnull instancetype)initWithContentRect:(NSRect)contentRect styleMask:(NSWindowStyleMask)style backing:(NSBackingStoreType)backingStoreType defer:(BOOL)flag SWIFT_UNAVAILABLE;
 @end
 
@@ -526,6 +528,17 @@ SWIFT_CLASS("_TtC8Snipsnap15RecordingEngine")
 - (void)stream:(SCStream * _Nonnull)stream didStopWithError:(NSError * _Nonnull)error;
 - (void)captureOutput:(AVCaptureOutput * _Nonnull)output didOutputSampleBuffer:(CMSampleBufferRef _Nonnull)sampleBuffer fromConnection:(AVCaptureConnection * _Nonnull)connection;
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+@end
+
+/// Video surface + annotation-style timeline row (play/pause, scrubber, time).
+SWIFT_CLASS("_TtC8Snipsnap28RecordingTimelinePreviewView")
+@interface RecordingTimelinePreviewView : NSView
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER SWIFT_UNAVAILABLE;
+@property (nonatomic, readonly) BOOL acceptsFirstResponder;
+- (void)viewDidChangeEffectiveAppearance;
+- (void)layout;
+- (void)keyDown:(NSEvent * _Nonnull)event;
 @end
 
 SWIFT_CLASS("_TtC8Snipsnap14SettingsWindow")

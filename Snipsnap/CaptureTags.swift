@@ -10,7 +10,6 @@ import Foundation
 enum CaptureTagKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case project
     case flow
-    case component
     case custom
 
     var id: String { rawValue }
@@ -19,18 +18,16 @@ enum CaptureTagKind: String, Codable, CaseIterable, Identifiable, Hashable {
         switch self {
         case .project: return "Project"
         case .flow: return "Flow"
-        case .component: return "Component"
         case .custom: return "Custom"
         }
     }
 
-    /// Sort order in the tag bar: Project → Flow → Component → Custom.
+    /// Sort order in the tag bar: Project → Flow → Custom.
     var sortOrder: Int {
         switch self {
         case .project: return 0
         case .flow: return 1
-        case .component: return 2
-        case .custom: return 3
+        case .custom: return 2
         }
     }
 }
@@ -64,54 +61,26 @@ struct CaptureTag: Identifiable, Codable, Hashable {
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
     }
+
 }
 
-/// Common UI-component labels for Auto-Tag suggestions and editing menus.
-enum CaptureUIComponentVocabulary {
-    static let common: Set<String> = [
-        "Button",
-        "Icon Button",
-        "Text Field",
-        "Search",
-        "Tab",
-        "Tab Bar",
-        "Navigation Bar",
-        "Sidebar",
-        "Modal",
-        "Dialog",
-        "Sheet",
-        "Drawer",
-        "Dropdown",
-        "Select",
-        "Checkbox",
-        "Radio",
-        "Toggle",
-        "Switch",
-        "Slider",
-        "Data Grid",
-        "Table",
-        "List",
-        "Card",
-        "Avatar",
-        "Badge",
-        "Chip",
-        "Toast",
-        "Alert",
-        "Banner",
-        "Tooltip",
-        "Popover",
-        "Pagination",
-        "Breadcrumb",
-        "Progress",
-        "Spinner",
-        "Chart",
-        "Calendar",
-        "Date Picker",
-        "Accordion",
-        "Menu",
-        "Toolbar",
-        "Form",
-        "Segmented Control",
-        "Empty State",
-    ]
+/// Decodes a tag while dropping unknown kinds (e.g. legacy `component`).
+struct LossyCaptureTag: Decodable {
+    let tag: CaptureTag?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(UUID.self, forKey: .id)
+        let name = try container.decode(String.self, forKey: .name)
+        let rawKind = try container.decode(String.self, forKey: .kind)
+        guard let kind = CaptureTagKind(rawValue: rawKind) else {
+            tag = nil
+            return
+        }
+        tag = CaptureTag(id: id, kind: kind, name: name)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, kind, name
+    }
 }

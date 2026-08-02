@@ -19,20 +19,17 @@ struct RenameSuggestion: Equatable {
     let suggestedName: String?
     let suggestedProject: String?
     let suggestedFlow: String?
-    let suggestedComponents: [String]
     let confidence: Double
 
     init(
         suggestedName: String?,
         suggestedProject: String?,
         suggestedFlow: String? = nil,
-        suggestedComponents: [String] = [],
         confidence: Double
     ) {
         self.suggestedName = suggestedName
         self.suggestedProject = suggestedProject
         self.suggestedFlow = suggestedFlow
-        self.suggestedComponents = suggestedComponents
         self.confidence = confidence
     }
 
@@ -51,12 +48,8 @@ struct RenameSuggestion: Equatable {
         return !suggestedFlow.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    var hasComponents: Bool {
-        !suggestedComponents.isEmpty
-    }
-
     var hasTags: Bool {
-        hasProject || hasFlow || hasComponents
+        hasProject || hasFlow
     }
 }
 
@@ -280,7 +273,7 @@ enum CaptureClassifier {
         }.value
     }
 
-    /// Library inline suggestion: rename + project + optional flow/component tags.
+    /// Library inline suggestion: rename + project + optional flow tag.
     /// Falls back to the deterministic chain when Foundation Models is unavailable
     /// (project only, no rename / tag signal).
     static func suggestRenameAndProject(for request: CaptureSuggestionRequest) async -> RenameSuggestion? {
@@ -292,16 +285,6 @@ enum CaptureClassifier {
     /// Same pipeline as `suggestRenameAndProject` — named for preview Auto-Tag.
     static func suggestTags(for request: CaptureSuggestionRequest) async -> RenameSuggestion? {
         await suggestRenameAndProject(for: request)
-    }
-
-    /// Batch organize: deterministic chain first; LLM project inference only when rules miss.
-    static func classifyForOrganize(
-        image: NSImage,
-        windowInfo: WindowSignature?
-    ) async -> CaptureDestination? {
-        await Task.detached(priority: .utility) {
-            await classifyForOrganizeImpl(image: image, windowInfo: windowInfo)
-        }.value
     }
 
     static func imageForClassification(from entry: CaptureEntry) -> NSImage? {
@@ -387,46 +370,18 @@ enum CaptureClassifier {
         return nil
     }
 
-    private static func classifyForOrganizeImpl(
-        image: NSImage,
-        windowInfo: WindowSignature?
-    ) async -> CaptureDestination? {
-        let signature = windowInfo ?? WindowSignature(bundleID: nil, windowTitle: nil)
-        if let cached = CaptureDestinationMappingCache.shared.destination(for: signature) {
-            return cached
-        }
-
-        let ocrText = await recognizeText(in: image)
-
-        if let ruleResult = classifyWithRules(windowInfo: signature, ocrText: ocrText) {
-            return ruleResult
-        }
-
-        if let llmProject = await CaptureClassifierLLM.suggestProject(
-            image: image,
-            windowInfo: windowInfo,
-            ocrText: ocrText
-        ) {
-            return CaptureDestination(
-                productFolder: llmProject,
-                subfolder: nil,
-                confidence: 0.65,
-                source: .localLLM
-            )
-        }
-
-        return nil
-    }
-
     private static func suggestRenameAndProjectImpl(request: CaptureSuggestionRequest) async -> RenameSuggestion? {
         let signature = request.windowInfo ?? WindowSignature(bundleID: nil, windowTitle: nil)
-        let ocrText = await recognizeText(in: request.image)
+        // Accurate + spatially sorted OCR so top chrome (tabs/workspace) beats page body.
+        let ocrText = await recognizeText(in: request.image, accurate: true)
+        let existingProjects = CaptureLibraryOrganizer.existingProjectNames()
 
         if CaptureClassifierLLM.isAvailable {
             if let llm = await CaptureClassifierLLM.suggestRenameAndProject(
                 image: request.image,
                 windowInfo: request.windowInfo,
-                ocrText: ocrText
+                ocrText: ocrText,
+                existingProjects: existingProjects
             ) {
                 return llm
             }
@@ -778,7 +733,7 @@ enum CaptureClassifier {
 
     // MARK: - Vision OCR
 
-    private static func recognizeText(in image: NSImage) async -> String {
+    private static func recognizeText(in image: NSImage, accurate: Bool = false) async -> String {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
                 guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
@@ -787,13 +742,23 @@ enum CaptureClassifier {
                 }
 
                 let request = VNRecognizeTextRequest()
-                request.recognitionLevel = .fast
+                request.recognitionLevel = accurate ? .accurate : .fast
                 request.usesLanguageCorrection = false
 
                 let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
                 do {
                     try handler.perform([request])
+                    // Vision boxes use bottom-left origin — sort top→bottom, then left→right
+                    // so tab/workspace chrome precedes page body in the LLM prompt.
                     let lines = (request.results ?? [])
+                        .sorted { lhs, rhs in
+                            let a = lhs.boundingBox
+                            let b = rhs.boundingBox
+                            if abs(a.maxY - b.maxY) > 0.015 {
+                                return a.maxY > b.maxY
+                            }
+                            return a.minX < b.minX
+                        }
                         .compactMap { $0.topCandidates(1).first?.string }
                         .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .filter { !$0.isEmpty }

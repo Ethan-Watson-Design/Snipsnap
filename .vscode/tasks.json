@@ -6,9 +6,9 @@
       "action": "launch",
       "problemMatcher": ["$sweetpad-watch"],
       "label": "sweetpad: launch",
-      "detail": "Build and launch Snipsnap",
+      "detail": "Build and launch Grabbit",
       "isBackground": true,
-      "scheme": "Snipsnap",
+      "scheme": "Grabbit",
       "configuration": "Debug"
     },
     {
@@ -16,8 +16,8 @@
       "action": "build",
       "problemMatcher": ["$sweetpad-watch"],
       "label": "sweetpad: build",
-      "detail": "Build Snipsnap without launching",
-      "scheme": "Snipsnap",
+      "detail": "Build Grabbit without launching",
+      "scheme": "Grabbit",
       "configuration": "Debug"
     }
   ]

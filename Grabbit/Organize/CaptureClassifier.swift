@@ -140,7 +140,7 @@ struct EarlyCaptureSignals: Sendable {
 // MARK: - Mapping cache (stub)
 
 /// Persists confirmed app/window → folder mappings so future captures short-circuit
-/// inference. Full read/write path is here; `AutoOrganizer` calls `confirm` when the
+/// inference. Full read/write path is here; `CaptureOrganizer` calls `confirm` when the
 /// user taps the toast folder chip.
 final class CaptureDestinationMappingCache {
     static let shared = CaptureDestinationMappingCache()
@@ -177,7 +177,7 @@ final class CaptureDestinationMappingCache {
         mappings[signature]
     }
 
-    /// AutoOrganizer calls this after the user confirms a folder chip tap.
+    /// CaptureOrganizer calls this after the user confirms a folder chip tap.
     func confirm(signature: WindowSignature, destination: CaptureDestination) {
         mappings[signature] = destination
         persist()
@@ -270,9 +270,9 @@ enum CaptureClassifier {
 
     /// Runs off the caller's cooperative thread pool; never blocks capture or surfaces errors.
     ///
-    /// AutoOrganizer integration point: after capture, the caller should start this in a
+    /// CaptureOrganizer integration point: after capture, the caller should start this in a
     /// `Task` and, if a non-nil result arrives while `ToastWindow` is still visible (~4s),
-    /// pass it to `AutoOrganizer.attachFolderSuggestion(toast:destination:fileURL:)` (TBD).
+    /// pass it to `CaptureOrganizer.attachFolderSuggestion(toast:destination:fileURL:)` (TBD).
     /// Results that arrive after dismiss are dropped silently.
     static func classify(image: NSImage, windowInfo: WindowSignature) async -> CaptureDestination? {
         await Task.detached(priority: .utility) {

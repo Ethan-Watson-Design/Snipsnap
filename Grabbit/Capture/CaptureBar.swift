@@ -976,7 +976,11 @@ final class CaptureBar: NSPanel {
             CaptureBar.dismiss()
             ScreenshotEngine.captureRegion(rect) { img in
                 guard let img else { return }
-                CaptureBar.finishScreenshot(img, captureRect: rect)
+                CapturePipeline.finishScreenshot(
+                    img,
+                    captureRect: rect,
+                    earlySignals: CaptureBar.capturedEarlySignals
+                )
             }
 
         case .screenshotWindow:
@@ -989,7 +993,11 @@ final class CaptureBar: NSPanel {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         ScreenshotEngine.captureWindow(windowID, background: recBackground) { img in
                             guard let img else { return }
-                            CaptureBar.finishScreenshot(img, captureRect: nil)
+                            CapturePipeline.finishScreenshot(
+                                img,
+                                captureRect: nil,
+                                earlySignals: CaptureBar.capturedEarlySignals
+                            )
                         }
                     }
                 }
@@ -1001,7 +1009,11 @@ final class CaptureBar: NSPanel {
             CaptureBar.dismiss()
             ScreenshotEngine.captureRegion(rect) { img in
                 guard let img else { return }
-                CaptureBar.finishScreenshot(img, captureRect: rect)
+                CapturePipeline.finishScreenshot(
+                    img,
+                    captureRect: rect,
+                    earlySignals: CaptureBar.capturedEarlySignals
+                )
             }
 
         case .recordWindow:
@@ -1080,27 +1092,6 @@ final class CaptureBar: NSPanel {
             systemAudioEnabled: systemAudioEnabled,
             micDeviceID: micDeviceID
         )
-    }
-
-    private static func finishScreenshot(_ image: NSImage, captureRect: CGRect?) {
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.writeObjects([image])
-        let entry = CaptureHistory.shared.add(.screenshot(image))
-        (NSApp.delegate as? AppDelegate)?.rebuildMenu()
-        let early = capturedEarlySignals ?? CaptureClassifier.gatherEarlyCaptureSignals()
-        let windowInfo = CaptureClassifier.completeWindowSignature(from: early, captureRect: captureRect)
-        if let captureID = entry?.id {
-            AutoOrganizer.registerCaptureContext(captureID: captureID, windowInfo: windowInfo)
-        }
-        ToastWindow.show(image: image, associatedCaptureID: entry?.id) {
-            AnnotationWindow.show(
-                image: image,
-                fileName: entry?.displayName,
-                captureID: entry?.id,
-                windowInfo: windowInfo
-            )
-        }
     }
 
     // MARK: - Media Popup Menus

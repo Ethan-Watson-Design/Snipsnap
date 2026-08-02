@@ -43,7 +43,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             applyIdleStatusItemAppearance(to: button)
         }
 
-        rebuildMenu()
+        // Paint the status item before loading capture history (disk + optional thumb work).
+        DispatchQueue.main.async { [weak self] in
+            self?.rebuildMenu()
+        }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.requestAccessibilityPermissionIfNeeded()
@@ -444,26 +447,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let rect else { return }
                 ScreenshotEngine.captureRegion(rect) { image in
                     guard let image else { return }
-                    let pasteboard = NSPasteboard.general
-                    pasteboard.clearContents()
-                    pasteboard.writeObjects([image])
-                    let entry = CaptureHistory.shared.add(.screenshot(image))
-                    self.rebuildMenu()
-                    let windowInfo = CaptureClassifier.completeWindowSignature(
-                        from: earlySignals,
-                        captureRect: rect
+                    CapturePipeline.finishScreenshot(
+                        image,
+                        captureRect: rect,
+                        earlySignals: earlySignals
                     )
-                    if let captureID = entry?.id {
-                        AutoOrganizer.registerCaptureContext(captureID: captureID, windowInfo: windowInfo)
-                    }
-                    ToastWindow.show(image: image, associatedCaptureID: entry?.id) {
-                        AnnotationWindow.show(
-                            image: image,
-                            fileName: entry?.displayName,
-                            captureID: entry?.id,
-                            windowInfo: windowInfo
-                        )
-                    }
                 }
             }
         }

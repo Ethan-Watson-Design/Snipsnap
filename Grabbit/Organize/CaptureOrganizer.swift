@@ -1,5 +1,5 @@
 //
-//  AutoOrganizer.swift
+//  CaptureOrganizer.swift
 //  Grabbit
 //
 
@@ -12,7 +12,7 @@ struct OrganizeSuggestion: Equatable {
     let folderAlreadyExists: Bool
 }
 
-enum AutoOrganizer {
+enum CaptureOrganizer {
     private static var windowInfoByCaptureID: [UUID: WindowSignature] = [:]
 
     /// Window metadata captured at screenshot time, before Grabbit UI took focus.

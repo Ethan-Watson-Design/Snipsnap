@@ -1476,7 +1476,7 @@ private struct CaptureLibraryView: View {
     private func requestSuggestion(for entry: CaptureEntry) {
         guard let image = CaptureClassifier.imageForClassification(from: entry) else { return }
 
-        let windowInfo = AutoOrganizer.windowInfo(for: entry.id)
+        let windowInfo = CaptureOrganizer.windowInfo(for: entry.id)
         updateRowState(entry.id) { state in
             state.isLoading = true
             state.suggestion = nil

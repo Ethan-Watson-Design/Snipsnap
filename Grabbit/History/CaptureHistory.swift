@@ -254,6 +254,34 @@ final class CaptureHistory {
         try? fm.moveItem(at: legacyRoot, to: grabbitRoot)
     }
 
+    /// Manifest stores absolute paths; rewriting after the folder rename keeps thumbs findable
+    /// without regenerating every recording frame on the main thread at launch.
+    private static let legacyAppSupportPathComponent = "/Application Support/Snipsnap/"
+    private static let currentAppSupportPathComponent = "/Application Support/Grabbit/"
+
+    private static func rewritingLegacyAppSupportPath(_ path: String) -> String {
+        guard path.contains(legacyAppSupportPathComponent) else { return path }
+        return path.replacingOccurrences(
+            of: legacyAppSupportPathComponent,
+            with: currentAppSupportPathComponent
+        )
+    }
+
+    private static func rewritingLegacyAppSupportPaths(in entry: StoredCapture) -> StoredCapture {
+        let path = rewritingLegacyAppSupportPath(entry.path)
+        let thumbnailPath = entry.thumbnailPath.map(rewritingLegacyAppSupportPath)
+        guard path != entry.path || thumbnailPath != entry.thumbnailPath else { return entry }
+        return StoredCapture(
+            id: entry.id,
+            createdAt: entry.createdAt,
+            kind: entry.kind,
+            path: path,
+            thumbnailPath: thumbnailPath,
+            customName: entry.customName,
+            tags: entry.tags
+        )
+    }
+
     @discardableResult
     func add(_ item: CaptureItem) -> CaptureEntry? {
         let id = UUID()
@@ -648,7 +676,7 @@ final class CaptureHistory {
             confidence: 1.0,
             source: .windowMetadata
         )
-        guard AutoOrganizer.moveCapture(id: id, to: destination) else { return false }
+        guard CaptureOrganizer.moveCapture(id: id, to: destination) else { return false }
 
         return mutateTags(id: id, notify: true) { tags in
             tags.removeAll { $0.kind == .project }
@@ -806,22 +834,41 @@ final class CaptureHistory {
         var didMutateStored = false
 
         for entry in stored {
-            guard let item = captureItem(from: entry) else { continue }
+            var resolved = Self.rewritingLegacyAppSupportPaths(in: entry)
+            if resolved.path != entry.path || resolved.thumbnailPath != entry.thumbnailPath {
+                didMutateStored = true
+            }
 
-            var resolved = entry
-            // Backfill screenshot thumbnails so relaunch stays cheap.
-            if entry.kind == .screenshot,
-               entry.thumbnailPath == nil,
-               case .screenshot(let thumb) = item,
-               let thumbPath = saveThumbnail(thumb) {
+            // Stale absolute thumb paths (e.g. after rename) used to force a main-thread
+            // video frame extract for every recording on launch.
+            if let thumbPath = resolved.thumbnailPath,
+               !FileManager.default.fileExists(atPath: thumbPath) {
                 resolved = StoredCapture(
-                    id: entry.id,
-                    createdAt: entry.createdAt,
-                    kind: entry.kind,
-                    path: entry.path,
+                    id: resolved.id,
+                    createdAt: resolved.createdAt,
+                    kind: resolved.kind,
+                    path: resolved.path,
+                    thumbnailPath: nil,
+                    customName: resolved.customName,
+                    tags: resolved.tags
+                )
+                didMutateStored = true
+            }
+
+            guard let item = captureItem(from: resolved) else { continue }
+
+            // Backfill missing thumbnails so relaunch stays cheap and avoids
+            // regenerating frames from video on every launch.
+            if resolved.thumbnailPath == nil,
+               let thumbPath = saveThumbnail(item.thumbnail) {
+                resolved = StoredCapture(
+                    id: resolved.id,
+                    createdAt: resolved.createdAt,
+                    kind: resolved.kind,
+                    path: resolved.path,
                     thumbnailPath: thumbPath.path,
-                    customName: entry.customName,
-                    tags: entry.tags
+                    customName: resolved.customName,
+                    tags: resolved.tags
                 )
                 didMutateStored = true
             }
@@ -1025,17 +1072,26 @@ final class CaptureHistory {
         let asset = AVURLAsset(url: url)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
+        // Prefer a nearby keyframe so local loads stay cheap.
+        generator.requestedTimeToleranceBefore = .positiveInfinity
+        generator.requestedTimeToleranceAfter = .positiveInfinity
 
+        // Await image(at:) at .high instead of blocking on generateCGImageAsynchronously's
+        // Default-QoS callback (priority inversion from User-interactive callers).
+        let result = ThumbnailResult()
         let semaphore = DispatchSemaphore(value: 0)
-        let thumbnailResult = ThumbnailResult()
-        generator.generateCGImageAsynchronously(for: .zero) { cgImage, _, _ in
-            if let cgImage {
-                thumbnailResult.image = NSImage(cgImage: cgImage, size: .zero)
+        Task.detached(priority: .high) {
+            defer { semaphore.signal() }
+            do {
+                let (cgImage, _) = try await generator.image(at: .zero)
+                result.cgImage = cgImage
+            } catch {
+                result.cgImage = nil
             }
-            semaphore.signal()
         }
         semaphore.wait()
-        return thumbnailResult.image
+        guard let cgImage = result.cgImage else { return nil }
+        return NSImage(cgImage: cgImage, size: .zero)
     }
 
     // MARK: - Downsampling
@@ -1071,5 +1127,5 @@ final class CaptureHistory {
 }
 
 private final class ThumbnailResult: @unchecked Sendable {
-    var image: NSImage?
+    nonisolated(unsafe) var cgImage: CGImage?
 }

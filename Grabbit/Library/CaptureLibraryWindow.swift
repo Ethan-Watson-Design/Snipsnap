@@ -5,6 +5,7 @@
 
 import SwiftUI
 import Combine
+import QuartzCore
 @preconcurrency import AppKit
 
 enum AppDockPresentation {
@@ -42,6 +43,7 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
                 current = CaptureLibraryWindow()
             }
             AppDockPresentation.presentLibraryWindow()
+            CaptureHistory.shared.scheduleReconcileWithDisk()
             current?.reloadContent()
             current?.center()
             current?.makeKeyAndOrderFront(nil)
@@ -54,6 +56,13 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
                 current?.contentView?.layoutSubtreeIfNeeded()
             }
             NSApp.activate(ignoringOtherApps: true)
+
+            if !AppSettings.hasSeenLibraryIntro {
+                // Let the library finish ordering front before stacking the intro.
+                DispatchQueue.main.async {
+                    LibraryIntroWindow.show(markSeenOnContinue: true)
+                }
+            }
         }
     }
 
@@ -96,12 +105,12 @@ final class CaptureLibraryWindow: NSWindow, NSWindowDelegate {
     }
 
     func reloadContent() {
+        // Show whatever we already know immediately. Folder ingest (including video
+        // frame extracts) runs in the background via scheduleReconcileWithDisk so
+        // opening Show All never freezes the UI on a large save folder.
         let view = CaptureLibraryView(
             entries: CaptureHistory.shared.entriesInSaveRoot,
-            sessionState: sessionState,
-            onOpen: { entry in
-                CaptureLibraryWindow.open(entry)
-            }
+            sessionState: sessionState
         )
         if let hostingView {
             // Update in place so sidebar scroll position and @State selection survive.
@@ -705,7 +714,6 @@ private final class CaptureLibrarySidebarResizeHandleView: NSView {
 private struct CaptureLibraryView: View {
     let entries: [CaptureEntry]
     @ObservedObject var sessionState: CaptureLibrarySessionState
-    let onOpen: (CaptureEntry) -> Void
 
     @AppStorage("captureLibraryGroupBy") private var groupByRaw = CaptureLibraryGroupBy.none.rawValue
     @AppStorage("captureLibrarySidebarWidth") private var persistedSidebarWidth =
@@ -982,11 +990,7 @@ private struct CaptureLibraryView: View {
     private var sidebarColumn: some View {
         Group {
             if entries.isEmpty {
-                ContentUnavailableView(
-                    "No Captures Yet",
-                    systemImage: "photo.on.rectangle.angled",
-                    description: Text("Screenshots and recordings will appear here.")
-                )
+                Color.clear
             } else {
                 VStack(alignment: .leading, spacing: DesignTokens.Spacing.sm) {
                     groupByPicker
@@ -1156,7 +1160,6 @@ private struct CaptureLibraryView: View {
             CapturePreviewPane(
                 entry: entry,
                 sessionState: sessionState,
-                onOpen: onOpen,
                 onAutoTag: { requestSuggestion(for: entry) },
                 onAcceptSuggestion: { acceptSuggestion(for: entry) },
                 onDismissSuggestion: { dismissSuggestion(for: entry) },
@@ -1305,7 +1308,8 @@ private struct CaptureLibraryView: View {
     }
 
     private func listRowBackground(isSelected: Bool, isHovered: Bool) -> some View {
-        let fillOpacity: CGFloat = isSelected ? 1 : (isHovered ? 0.55 : 0)
+        // Hover sits one step below selection (was 0.55 — too light on the sidebar).
+        let fillOpacity: CGFloat = isSelected ? 1 : (isHovered ? 0.75 : 0)
         return RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
             .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(fillOpacity))
             // 0.5pt each side → 1pt gap between adjacent row backgrounds.
@@ -2054,7 +2058,6 @@ private enum AutoTagSuggestionPhase: Equatable {
 private struct CapturePreviewPane: View {
     let entry: CaptureEntry
     @ObservedObject var sessionState: CaptureLibrarySessionState
-    let onOpen: (CaptureEntry) -> Void
     let onAutoTag: () -> Void
     let onAcceptSuggestion: () -> Void
     let onDismissSuggestion: () -> Void
@@ -2184,16 +2187,11 @@ private struct CapturePreviewPane: View {
             previewContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                 .padding(.horizontal, CaptureLibraryChrome.windowEdgeInset)
+                .padding(.bottom, CaptureLibraryChrome.windowEdgeInset)
                 .transaction { transaction in
                     transaction.animation = nil
                     transaction.disablesAnimations = true
                 }
-
-            actionFooter
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, CaptureLibraryChrome.windowEdgeInset)
-                .padding(.trailing, CaptureLibraryChrome.windowEdgeInset)
-                .padding(.vertical, CaptureLibraryChrome.windowEdgeInset)
         }
         .background(DesignTokens.Color.background.swiftUI)
         .onAppear {
@@ -2206,6 +2204,10 @@ private struct CapturePreviewPane: View {
         }
         .onChange(of: rowState.suggestion != nil) { _, hasSuggestion in
             handleSuggestionPresenceChange(hasSuggestion)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .captureHistoryDidChange)) { _ in
+            // Pick up flattened image after in-preview Cmd+S without clearing the canvas first.
+            refreshScreenshotPreview()
         }
         .onDisappear {
             loadTask?.cancel()
@@ -2294,18 +2296,6 @@ private struct CapturePreviewPane: View {
                 .matchedGeometryEffect(id: "autoTag-flow", in: suggestionNamespace)
         } else {
             dropdown
-        }
-    }
-
-    private var actionFooter: some View {
-        HStack {
-            Spacer(minLength: 0)
-            Button("Annotate") {
-                onOpen(entry)
-            }
-            .buttonStyle(.grabbitProminent)
-            .keyboardShortcut(.return, modifiers: [])
-            .disabled(suggestionPhase == .accepting || suggestionPhase == .rejecting)
         }
     }
 
@@ -2476,14 +2466,14 @@ private struct CapturePreviewPane: View {
         switch entry.item {
         case .screenshot:
             if let fullScreenshot {
-                Image(nsImage: fullScreenshot)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+                ScreenshotLibraryAnnotationRepresentable(
+                    image: fullScreenshot,
+                    captureID: entry.id
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ZStack {
-                    Image(nsImage: entry.thumbnail)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
+                    CaptureLibraryAspectFitImage(image: entry.thumbnail)
                         .blur(radius: 2)
                         .opacity(0.55)
                     ProgressView()
@@ -2514,6 +2504,80 @@ private struct CapturePreviewPane: View {
             guard !Task.isCancelled else { return }
             fullScreenshot = CaptureHistory.shared.fullImage(for: id)
         }
+    }
+
+    private func refreshScreenshotPreview() {
+        guard case .screenshot = entry.item else { return }
+        if let image = CaptureHistory.shared.fullImage(for: entry.id) {
+            fullScreenshot = image
+        }
+    }
+}
+
+/// Aspect-fit screenshot preview backed by a CALayer so frame updates during sidebar
+/// resize are not implicitly animated (SwiftUI `Image` + `.aspectRatio` lags the pane).
+private struct CaptureLibraryAspectFitImage: NSViewRepresentable {
+    let image: NSImage
+
+    func makeNSView(context: Context) -> CaptureLibraryAspectFitImageView {
+        let view = CaptureLibraryAspectFitImageView()
+        view.setImage(image)
+        return view
+    }
+
+    func updateNSView(_ nsView: CaptureLibraryAspectFitImageView, context: Context) {
+        nsView.setImage(image)
+    }
+}
+
+private final class CaptureLibraryAspectFitImageView: NSView {
+    private let imageLayer = CALayer()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        imageLayer.contentsGravity = .resizeAspect
+        imageLayer.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+        imageLayer.actions = [
+            "bounds": NSNull(),
+            "position": NSNull(),
+            "contents": NSNull()
+        ]
+        layer?.addSublayer(imageLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func setImage(_ image: NSImage) {
+        // Prefer a CGImage snapshot so contentsScale / retina stays sharp while resizing.
+        if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            imageLayer.contents = cgImage
+        } else {
+            imageLayer.contents = image
+        }
+        imageLayer.contentsScale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2
+        needsLayout = true
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        imageLayer.contentsScale = window?.backingScaleFactor
+            ?? NSScreen.main?.backingScaleFactor
+            ?? 2
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        imageLayer.frame = bounds
+        CATransaction.commit()
     }
 }
 

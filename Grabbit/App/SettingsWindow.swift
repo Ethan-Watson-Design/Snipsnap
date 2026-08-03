@@ -7,70 +7,48 @@ import AppKit
 import Foundation
 import SwiftUI
 
-// MARK: - Settings panes
-
-private enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
-    case general
-    case kitchenSink
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .general: return "General"
-        case .kitchenSink: return "Kitchen Sink"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .general: return "gearshape"
-        case .kitchenSink: return "square.grid.2x2"
-        }
-    }
-}
-
 private struct SettingsRootView: View {
-    @State private var selection: SettingsPane = .general
-
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xs) {
-                ForEach(SettingsPane.allCases) { pane in
-                    Button {
-                        selection = pane
-                    } label: {
-                        Label(pane.title, systemImage: pane.systemImage)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, DesignTokens.Spacing.md)
-                            .padding(.vertical, DesignTokens.Spacing.sm)
-                            .background(
-                                RoundedRectangle(cornerRadius: DesignTokens.Radius.sm, style: .continuous)
-                                    .fill(DesignTokens.Color.listSelectionFill.swiftUI.opacity(selection == pane ? 1 : 0))
-                            )
-                            .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-                Spacer(minLength: 0)
+        ScrollView {
+            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxl) {
+                #if DEBUG
+                debugLaunchersSection
+                #endif
+                GeneralSettingsView()
             }
-            .padding(DesignTokens.Spacing.md)
-            .frame(width: 180, alignment: .topLeading)
-
-            Group {
-                switch selection {
-                case .general:
-                    GeneralSettingsView()
-                case .kitchenSink:
-                    KitchenSinkView()
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(DesignTokens.Spacing.xl)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(DesignTokens.Color.background.swiftUI)
-        .frame(minWidth: 720, minHeight: 480)
+        .frame(minWidth: 560, minHeight: 420)
     }
+
+    #if DEBUG
+    private var debugLaunchersSection: some View {
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.md) {
+            Text("DEBUG")
+                .font(.grabbit(.caption))
+                .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
+
+            Divider()
+
+            HStack(spacing: DesignTokens.Spacing.md) {
+                Button("Intro Window") {
+                    LibraryIntroWindow.show(markSeenOnContinue: false)
+                }
+                .buttonStyle(.grabbit)
+
+                Button("Kitchen Sink") {
+                    KitchenSinkWindow.show()
+                }
+                .buttonStyle(.grabbit)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, DesignTokens.Spacing.sm)
+        }
+    }
+    #endif
 }
 
 // MARK: - General
@@ -79,20 +57,17 @@ private struct GeneralSettingsView: View {
     @State private var destinationPath = AppSettings.destinationFolderDisplayPath
 
     private let shortcuts: [(String, [String])] = [
-        ("Snap Area", ["⌘", "⇧", "3"]),
-        ("Record Screen", ["⌘", "⇧", "4"]),
-        ("Clip Voice", ["⌘", "⇧", "5"]),
+        ("Grab Screen", ["⌘", "⇧", "3"]),
+        ("Grab Region", ["⌘", "⇧", "4"]),
+        ("Capture Bar", ["⌘", "⇧", "5"]),
     ]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxl) {
-                saveLocationSection
-                shortcutsSection
-            }
-            .padding(DesignTokens.Spacing.xl)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: DesignTokens.Spacing.xxl) {
+            saveLocationSection
+            shortcutsSection
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var saveLocationSection: some View {
@@ -112,6 +87,7 @@ private struct GeneralSettingsView: View {
                 Button("Change…") {
                     chooseDestinationFolder()
                 }
+                .buttonStyle(.grabbit)
             }
             .padding(.vertical, DesignTokens.Spacing.sm)
         }
@@ -210,17 +186,17 @@ final class SettingsWindow: NSWindow {
 
     private init() {
         super.init(
-            contentRect: NSRect(x: 0, y: 0, width: 780, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         title = "Grabbit Settings"
         isReleasedWhenClosed = false
-        minSize = NSSize(width: 640, height: 420)
+        minSize = NSSize(width: 520, height: 400)
 
         let hosting = NSHostingView(rootView: SettingsRootView())
-        hosting.frame = NSRect(x: 0, y: 0, width: 780, height: 560)
+        hosting.frame = NSRect(x: 0, y: 0, width: 640, height: 520)
         contentView = hosting
     }
 }

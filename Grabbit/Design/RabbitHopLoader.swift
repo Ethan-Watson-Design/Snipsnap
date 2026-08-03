@@ -14,7 +14,7 @@ import SwiftUI
 struct RabbitIcon: View {
     var width: CGFloat = 18
 
-    private static let aspect: CGFloat = 25.0 / 12.0
+    private static let aspect: CGFloat = 30.0 / 14.0
 
     var body: some View {
         Image("MenuBarIcon")

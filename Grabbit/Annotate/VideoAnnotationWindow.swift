@@ -57,6 +57,10 @@ final class VideoTimelineView: NSView {
     private let minDuration: Double = 0.05
 
     override var acceptsFirstResponder: Bool { true }
+    override var focusRingType: NSFocusRingType {
+        get { .none }
+        set { }
+    }
 
     private var hasSelection: Bool { selectionStartTime != nil }
 
@@ -923,6 +927,7 @@ final class VideoAnnotationWindow: NSWindow {
                 if mediaSize.width > 0, mediaSize.height > 0 {
                     self.videoNaturalSize = mediaSize
                     self.canvas.videoAspectRatio = mediaSize.width / mediaSize.height
+                    self.canvas.videoMediaSize = mediaSize
                     self.playerView.mediaSize = mediaSize
                     self.fitWindowToMediaSize(mediaSize)
                     self.playerView.updateZoomPreview()

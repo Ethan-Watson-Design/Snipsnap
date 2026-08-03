@@ -532,15 +532,26 @@ SWIFT_CLASS("_TtC7Grabbit15RecordingEngine")
 - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
 @end
 
-/// Video surface + annotation-style timeline row (play/pause, scrubber, time).
+/// Video surface + annotation canvas/toolbar + timeline row (play/pause, scrubber, time).
 SWIFT_CLASS("_TtC7Grabbit28RecordingTimelinePreviewView")
 @interface RecordingTimelinePreviewView : NSView
 - (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
 - (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER SWIFT_UNAVAILABLE;
 @property (nonatomic, readonly) BOOL acceptsFirstResponder;
+- (void)viewDidMoveToWindow;
 - (void)viewDidChangeEffectiveAppearance;
 - (void)layout;
 - (void)keyDown:(NSEvent * _Nonnull)event;
+@end
+
+/// Screenshot preview with annotation canvas and toolbar pill (Cmd+S to save).
+SWIFT_CLASS("_TtC7Grabbit31ScreenshotLibraryAnnotationView")
+@interface ScreenshotLibraryAnnotationView : NSView
+- (nonnull instancetype)initWithFrame:(NSRect)frameRect OBJC_DESIGNATED_INITIALIZER;
+- (nullable instancetype)initWithCoder:(NSCoder * _Nonnull)coder OBJC_DESIGNATED_INITIALIZER SWIFT_UNAVAILABLE;
+@property (nonatomic, readonly) BOOL acceptsFirstResponder;
+- (void)viewDidMoveToWindow;
+- (void)layout;
 @end
 
 SWIFT_CLASS("_TtC7Grabbit14SettingsWindow")

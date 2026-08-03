@@ -2,12 +2,13 @@
 //  KitchenSinkView.swift
 //  Grabbit
 //
-//  Design-system + component gallery for Settings → Kitchen Sink.
+//  Design-system + component gallery. Opened from Settings → DEBUG.
 //
 
 import AppKit
 import SwiftUI
 
+#if DEBUG
 struct KitchenSinkView: View {
     private enum AppearanceOverride: String, CaseIterable, Identifiable {
         case system, light, dark
@@ -41,6 +42,7 @@ struct KitchenSinkView: View {
     ]
     @State private var demoToggle = true
     @State private var demoPicker = "Region"
+    @State private var demoAutoTagLoading = false
 
     var body: some View {
         ScrollView {
@@ -59,6 +61,7 @@ struct KitchenSinkView: View {
                 annotationChromeSection
                 controlsSection
                 toastSection
+                autoTagDemoSection
             }
             .padding(DesignTokens.Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -214,7 +217,7 @@ struct KitchenSinkView: View {
                 ForEach(["⌘", "⇧", "3"], id: \.self) { key in
                     KeyBadgeView(label: key)
                 }
-                Text("Snap Area")
+                Text("Grab Screen")
                     .font(.grabbit(.body))
                     .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
                     .padding(.leading, DesignTokens.Spacing.sm)
@@ -369,6 +372,25 @@ struct KitchenSinkView: View {
         }
     }
 
+    // MARK: - Auto-Tag demo
+
+    private var autoTagDemoSection: some View {
+        KitchenSinkSection(title: "Auto-Tag") {
+            Button {
+                guard !demoAutoTagLoading else { return }
+                demoAutoTagLoading = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(3))
+                    demoAutoTagLoading = false
+                }
+            } label: {
+                KitchenSinkAutoTagLabel(isLoading: demoAutoTagLoading)
+            }
+            .buttonStyle(KitchenSinkAutoTagButtonStyle())
+            .help(demoAutoTagLoading ? "Auto-tagging…" : "Auto-Tag")
+        }
+    }
+
     // MARK: - Helpers
 
     private func colorSwatch(_ name: String, _ color: Color) -> some View {
@@ -494,6 +516,70 @@ struct KitchenSinkView: View {
                     .foregroundStyle(DesignTokens.Color.textSecondary.swiftUI)
                     .padding(.bottom, DesignTokens.Spacing.sm)
             }
+    }
+}
+
+// MARK: - Auto-Tag demo label
+
+/// Bigger kitchen-sink Auto-Tag control: idle rabbit + label, hop loader while running.
+private struct KitchenSinkAutoTagLabel: View {
+    let isLoading: Bool
+
+    private static let spacing: CGFloat = 10
+    private static let idleSize = CGSize(width: 28, height: 28 * 12 / 25)
+    private static let loadingSize = RabbitHopLoader.Size.button.pointSize
+
+    var body: some View {
+        HStack(spacing: Self.spacing) {
+            Color.clear
+                .frame(width: Self.idleSize.width, height: Self.idleSize.height)
+            Text("Auto-Tag")
+                .opacity(isLoading ? 0 : 1)
+                .animation(nil, value: isLoading)
+        }
+        .overlay {
+            GeometryReader { geo in
+                let rabbitSize = isLoading ? Self.loadingSize : Self.idleSize
+                let x = isLoading ? (geo.size.width - rabbitSize.width) / 2 : 0
+                let y = (geo.size.height - rabbitSize.height) / 2
+
+                RabbitHopLoader(
+                    size: .button,
+                    isAnimating: isLoading,
+                    pointSizeOverride: rabbitSize
+                )
+                .offset(x: x, y: y)
+            }
+        }
+        .animation(.easeInOut(duration: 0.28), value: isLoading)
+    }
+}
+
+/// Enlarged soft secondary chrome for the kitchen-sink Auto-Tag demo.
+private struct KitchenSinkAutoTagButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(Font.custom(
+                DesignTokens.Typography.postScriptName(for: .regular),
+                size: 18
+            ))
+            .foregroundStyle(DesignTokens.Color.textPrimary.swiftUI)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 10)
+            .background {
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous)
+                    .fill(
+                        configuration.isPressed
+                            ? DesignTokens.Color.softControlFillHovered.swiftUI
+                            : DesignTokens.Color.softControlFill.swiftUI
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous)
+                    .strokeBorder(DesignTokens.Color.softControlBorder.swiftUI, lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.md, style: .continuous))
+            .pointerStyle(.link)
     }
 }
 
@@ -777,3 +863,4 @@ private struct ToolbarPillReplica: View {
         )
     }
 }
+#endif

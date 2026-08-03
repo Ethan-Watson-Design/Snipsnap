@@ -7,25 +7,31 @@
 
 import AppKit
 
+enum ToastChromeStyle {
+    /// Frosted HUD material (default).
+    case adaptive
+    /// Solid dark neutral fill — Capture Bar hover labels.
+    case darkNeutral
+}
+
+enum ToastAnchorPlacement {
+    /// Toast sits below the anchor (e.g. under a title bar).
+    case below
+    /// Toast sits above the anchor (e.g. over the Capture Bar).
+    case above
+}
+
 final class ToastWindow: NSPanel {
 
     private static var current: ToastWindow?
-    static var currentAssociatedCaptureID: UUID? { current?.associatedCaptureID }
-    static var currentToast: ToastWindow? { current }
 
     let associatedCaptureID: UUID?
     private let onTap: () -> Void
     private var dismissTimer: Timer?
-    private var dismissalDuration: TimeInterval = 4.0
-    private weak var backgroundView: NSVisualEffectView?
-    private weak var toastContainerView: NSView?
-    private weak var thumbnailView: NSImageView?
-    private weak var chipButton: NSButton?
-    private weak var messageLabel: NSTextField?
     private weak var messageActionButton: NSButton?
     private var messageActionTrampoline: ToastActionTrampoline?
-    private var chipAction: (() -> Void)?
     private var anchorScreenRect: NSRect?
+    private var anchorPlacement: ToastAnchorPlacement = .below
 
     // MARK: - Entry point
 
@@ -38,12 +44,32 @@ final class ToastWindow: NSPanel {
         }
     }
 
-    static func show(message: String, associatedCaptureID: UUID? = nil) {
+    static func show(
+        message: String,
+        associatedCaptureID: UUID? = nil,
+        aboveScreenRect: NSRect? = nil,
+        chrome: ToastChromeStyle = .adaptive,
+        hostWindow: NSWindow? = nil,
+        autoDismiss: Bool = true
+    ) {
         DispatchQueue.main.async {
             current?.cancelAndClose()
-            let window = ToastWindow(message: message, associatedCaptureID: associatedCaptureID)
+            let window = ToastWindow(
+                message: message,
+                associatedCaptureID: associatedCaptureID,
+                anchorScreenRect: aboveScreenRect,
+                anchorPlacement: aboveScreenRect == nil ? .below : .above,
+                chrome: chrome
+            )
             current = window
-            window.presentAnimated()
+            window.presentAnimated(hostWindow: hostWindow, autoDismiss: autoDismiss)
+        }
+    }
+
+    /// Dismisses the current toast if one is showing (used for hover-only Capture Bar labels).
+    static func dismissCurrent() {
+        DispatchQueue.main.async {
+            current?.dismissAnimated()
         }
     }
 
@@ -66,21 +92,9 @@ final class ToastWindow: NSPanel {
                 onAction: onAction
             )
             current = window
-            if associatedCaptureID != nil {
-                window.prepareForPendingFolderSuggestion()
-            }
             window.presentAnimated(hostWindow: hostWindow)
             onPresented?()
         }
-    }
-
-    func prepareForPendingFolderSuggestion() {
-        dismissalDuration = 8.0
-        restartDismissTimer()
-    }
-
-    static func isCurrentToast(for captureID: UUID) -> Bool {
-        current?.associatedCaptureID == captureID
     }
 
     // MARK: - Init
@@ -120,37 +134,16 @@ final class ToastWindow: NSPanel {
         positionBottomRight(contentSize: contentSize)
     }
 
-    private init(message: String, associatedCaptureID: UUID?) {
-        self.associatedCaptureID = associatedCaptureID
-        self.onTap = {}
-
-        super.init(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-
-        configurePanel(level: .floating)
-
-        let (contentView, background, contentSize, label) = ToastWindow.makeMessageContent(message: message)
-        self.contentView = contentView
-        toastContainerView = contentView
-        backgroundView = background
-        messageLabel = label
-
-        positionBottomCenter(contentSize: contentSize)
-    }
-
     private init(
         message: String,
         associatedCaptureID: UUID?,
-        actionTitle: String,
-        anchorScreenRect: NSRect?,
-        onAction: @escaping () -> Void
+        anchorScreenRect: NSRect? = nil,
+        anchorPlacement: ToastAnchorPlacement = .below,
+        chrome: ToastChromeStyle = .adaptive
     ) {
         self.associatedCaptureID = associatedCaptureID
         self.anchorScreenRect = anchorScreenRect
+        self.anchorPlacement = anchorPlacement
         self.onTap = {}
 
         super.init(
@@ -162,15 +155,39 @@ final class ToastWindow: NSPanel {
 
         configurePanel(level: anchorScreenRect == nil ? .floating : .popUpMenu)
 
-        let (contentView, contentSize, label, actionButton, background) = makeMessageContent(
+        let (contentView, contentSize) = ToastWindow.makeMessageContent(message: message, chrome: chrome)
+        self.contentView = contentView
+
+        positionForAnchor(contentSize: contentSize)
+    }
+
+    private init(
+        message: String,
+        associatedCaptureID: UUID?,
+        actionTitle: String,
+        anchorScreenRect: NSRect?,
+        onAction: @escaping () -> Void
+    ) {
+        self.associatedCaptureID = associatedCaptureID
+        self.anchorScreenRect = anchorScreenRect
+        self.anchorPlacement = .below
+        self.onTap = {}
+
+        super.init(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        configurePanel(level: anchorScreenRect == nil ? .floating : .popUpMenu)
+
+        let (contentView, contentSize, actionButton) = makeMessageContent(
             message: message,
             actionTitle: actionTitle,
             onAction: onAction
         )
         self.contentView = contentView
-        toastContainerView = contentView
-        backgroundView = background
-        messageLabel = label
         self.messageActionButton = actionButton
 
         positionForAnchor(contentSize: contentSize)
@@ -199,25 +216,41 @@ final class ToastWindow: NSPanel {
         right: DesignTokens.Spacing.lg
     )
 
-    private static func makeToastChrome(size: NSSize) -> (container: NSView, background: NSVisualEffectView) {
+    private static func makeToastChrome(
+        size: NSSize,
+        chrome: ToastChromeStyle = .adaptive
+    ) -> (container: NSView, contentHost: NSView) {
         let cornerRadius = DesignTokens.Radius.lg
         let bounds = NSRect(origin: .zero, size: size)
 
         let container = NSView(frame: bounds)
         container.wantsLayer = true
 
-        let vfx = NSVisualEffectView(frame: bounds)
-        vfx.material = .hudWindow
-        vfx.blendingMode = .behindWindow
-        vfx.state = .active
-        vfx.wantsLayer = true
-        vfx.layer?.cornerRadius = cornerRadius
-        vfx.layer?.cornerCurve = .continuous
-        vfx.layer?.masksToBounds = true
+        switch chrome {
+        case .adaptive:
+            let vfx = NSVisualEffectView(frame: bounds)
+            vfx.material = .hudWindow
+            vfx.blendingMode = .behindWindow
+            vfx.state = .active
+            vfx.wantsLayer = true
+            vfx.layer?.cornerRadius = cornerRadius
+            vfx.layer?.cornerCurve = .continuous
+            vfx.layer?.masksToBounds = true
+            container.addSubview(vfx)
+            applyToastShadow(to: container)
+            return (container, vfx)
 
-        container.addSubview(vfx)
-        applyToastShadow(to: container)
-        return (container, vfx)
+        case .darkNeutral:
+            let fill = NSView(frame: bounds)
+            fill.wantsLayer = true
+            fill.layer?.backgroundColor = DesignTokens.Color.toastDarkFill.ns.cgColor
+            fill.layer?.cornerRadius = cornerRadius
+            fill.layer?.cornerCurve = .continuous
+            fill.layer?.masksToBounds = true
+            container.addSubview(fill)
+            applyToastShadow(to: container)
+            return (container, fill)
+        }
     }
 
     private static func applyToastShadow(to container: NSView) {
@@ -229,18 +262,12 @@ final class ToastWindow: NSPanel {
         )
     }
 
-    private func resizeToastChrome(to size: NSSize) {
-        toastContainerView?.setFrameSize(size)
-        backgroundView?.setFrameSize(size)
-        if let container = toastContainerView {
-            ToastWindow.applyToastShadow(to: container)
-        }
-    }
-
-    private static func messageLabel(for message: String) -> NSTextField {
+    private static func messageLabel(for message: String, chrome: ToastChromeStyle = .adaptive) -> NSTextField {
         let label = NSTextField(labelWithString: message)
         label.font = messageFont
-        label.textColor = DesignTokens.Color.textPrimary.ns
+        label.textColor = chrome == .darkNeutral
+            ? DesignTokens.Color.textOnPrimary.ns
+            : DesignTokens.Color.textPrimary.ns
         label.alignment = .center
         label.lineBreakMode = .byClipping
         label.cell?.wraps = false
@@ -248,9 +275,12 @@ final class ToastWindow: NSPanel {
         return label
     }
 
-    private static func makeMessageContent(message: String) -> (view: NSView, background: NSVisualEffectView, size: NSSize, label: NSTextField) {
+    private static func makeMessageContent(
+        message: String,
+        chrome: ToastChromeStyle = .adaptive
+    ) -> (view: NSView, size: NSSize) {
         let padding = ToastWindow.messagePadding
-        let label = ToastWindow.messageLabel(for: message)
+        let label = ToastWindow.messageLabel(for: message, chrome: chrome)
         label.sizeToFit()
 
         let textW = ceil(label.frame.width)
@@ -260,18 +290,18 @@ final class ToastWindow: NSPanel {
             height: textH + padding.top + padding.bottom
         )
 
-        let (container, vfx) = ToastWindow.makeToastChrome(size: size)
+        let (container, host) = ToastWindow.makeToastChrome(size: size, chrome: chrome)
 
         label.frame = NSRect(x: padding.left, y: padding.bottom, width: textW, height: textH)
-        vfx.addSubview(label)
-        return (container, vfx, size, label)
+        host.addSubview(label)
+        return (container, size)
     }
 
     private func makeMessageContent(
         message: String,
         actionTitle: String,
         onAction: @escaping () -> Void
-    ) -> (view: NSView, size: NSSize, label: NSTextField, actionButton: NSButton, background: NSVisualEffectView) {
+    ) -> (view: NSView, size: NSSize, actionButton: NSButton) {
         let padding = ToastWindow.messagePadding
         let label = ToastWindow.messageLabel(for: message)
         label.sizeToFit()
@@ -281,7 +311,7 @@ final class ToastWindow: NSPanel {
         actionButton.bezelStyle = .inline
         actionButton.font = NSFont.grabbit(.body)
         actionButton.alignment = .center
-        actionButton.contentTintColor = DesignTokens.Color.primary.ns
+        actionButton.contentTintColor = DesignTokens.Color.textSecondary.ns
         actionButton.setButtonType(.momentaryChange)
         actionButton.action = #selector(ToastActionTrampoline.handleTap)
         let trampoline = ToastActionTrampoline { [weak self] in
@@ -301,7 +331,7 @@ final class ToastWindow: NSPanel {
         let contentH = textH + actionH + spacing + padding.top + padding.bottom
         let size = NSSize(width: contentW, height: contentH)
 
-        let (container, vfx) = ToastWindow.makeToastChrome(size: size)
+        let (container, host) = ToastWindow.makeToastChrome(size: size)
 
         label.frame = NSRect(
             x: (size.width - textW) / 2,
@@ -316,14 +346,14 @@ final class ToastWindow: NSPanel {
             height: actionH
         )
 
-        vfx.addSubview(label)
-        vfx.addSubview(actionButton)
-        return (container, size, label, actionButton, vfx)
+        host.addSubview(label)
+        host.addSubview(actionButton)
+        return (container, size, actionButton)
     }
 
     private func buildContentView(image: NSImage, size: NSSize) -> NSView {
         let padding = DesignTokens.Spacing.md
-        let (container, vfx) = ToastWindow.makeToastChrome(size: size)
+        let (container, host) = ToastWindow.makeToastChrome(size: size)
 
         // Thumbnail
         let thumbW = size.width - padding * 2
@@ -337,10 +367,7 @@ final class ToastWindow: NSPanel {
         imageView.layer?.cornerRadius = DesignTokens.Radius.sm
         imageView.layer?.masksToBounds = true
 
-        vfx.addSubview(imageView)
-        backgroundView = vfx
-        thumbnailView = imageView
-        toastContainerView = container
+        host.addSubview(imageView)
         return container
     }
 
@@ -355,21 +382,22 @@ final class ToastWindow: NSPanel {
         setFrame(NSRect(origin: origin, size: contentSize), display: false)
     }
 
-    private func positionBottomCenter(contentSize: NSSize) {
+    private func positionForAnchor(contentSize: NSSize) {
         setFrame(NSRect(origin: anchoredOrigin(for: contentSize), size: contentSize), display: false)
     }
 
-    private func positionForAnchor(contentSize: NSSize) {
-        positionBottomCenter(contentSize: contentSize)
-    }
-
     private func anchoredOrigin(for contentSize: NSSize) -> NSPoint {
-        if let titleBarAnchor = anchorScreenRect {
-            let margin: CGFloat = 6
-            return NSPoint(
-                x: titleBarAnchor.midX - contentSize.width / 2,
-                y: titleBarAnchor.minY - contentSize.height - margin
-            )
+        if let anchor = anchorScreenRect {
+            let margin: CGFloat = 8
+            let x = anchor.midX - contentSize.width / 2
+            let y: CGFloat
+            switch anchorPlacement {
+            case .below:
+                y = anchor.minY - contentSize.height - margin
+            case .above:
+                y = anchor.maxY + margin
+            }
+            return NSPoint(x: x, y: y)
         }
         return screenBottomCenterOrigin(for: contentSize)
     }
@@ -385,11 +413,11 @@ final class ToastWindow: NSPanel {
 
     // MARK: - Animation
 
-    private func presentAnimated(hostWindow: NSWindow? = nil) {
+    private func presentAnimated(hostWindow: NSWindow? = nil, autoDismiss: Bool = true) {
         let targetFrame = frame
         alphaValue = 0
-        let slidesFromAbove = anchorScreenRect != nil
-        let offscreen = targetFrame.offsetBy(dx: 0, dy: slidesFromAbove ? 12 : -20)
+        let slidesFromAbove = anchorScreenRect != nil && anchorPlacement == .below
+        let offscreen = targetFrame.offsetBy(dx: 0, dy: slidesFromAbove ? 12 : -12)
         setFrame(offscreen, display: false)
         orderFrontRegardless()
         if let hostWindow {
@@ -403,12 +431,19 @@ final class ToastWindow: NSPanel {
             animator().setFrame(targetFrame, display: true)
         }
 
-        scheduleDismiss()
+        if autoDismiss {
+            scheduleDismiss()
+        }
     }
 
     private func scheduleDismiss() {
-        dismissalDuration = 4.0
-        restartDismissTimer()
+        dismissTimer?.invalidate()
+        dismissTimer = nil
+        dismissTimer = Timer.scheduledTimer(withTimeInterval: 4.0, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.dismissAnimated()
+            }
+        }
     }
 
     private func dismissAnimated() {
@@ -421,8 +456,11 @@ final class ToastWindow: NSPanel {
             animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             DispatchQueue.main.async {
-                self?.close()
-                ToastWindow.current = nil
+                guard let self else { return }
+                self.close()
+                if ToastWindow.current === self {
+                    ToastWindow.current = nil
+                }
             }
         })
     }
@@ -439,205 +477,10 @@ final class ToastWindow: NSPanel {
     override func mouseUp(with event: NSEvent) {
         guard let contentView else { return }
         let locationInContent = contentView.convert(event.locationInWindow, from: nil)
-        if let chipButton, chipButton.frame.contains(locationInContent) {
-            return
-        }
         if let messageActionButton, messageActionButton.frame.contains(locationInContent) {
             return
         }
         handleTap()
-    }
-
-    func attachFolderSuggestion(_ destination: CaptureDestination, onConfirm: @escaping () -> Void) {
-        chipAction = onConfirm
-        let destinationCopy = destination
-        DispatchQueue.main.async { [weak self] in
-            self?.applyFolderSuggestionLayout(destination: destinationCopy)
-        }
-    }
-
-    private func applyFolderSuggestionLayout(destination: CaptureDestination) {
-        guard let contentView = backgroundView else { return }
-
-        let chipLabel = folderChipLabel(for: destination)
-        let button = chipButton ?? makeFolderChipButton()
-        setChipTitle(chipLabel, on: button)
-
-        let chipFont = NSFont.grabbit(.caption)
-        let chipVerticalGap: CGFloat = 8
-        let chipHorizontalPadding: CGFloat = 10
-        let chipHeight: CGFloat = 24
-        let measuredTextWidth = ceil(
-            (chipLabel as NSString).size(withAttributes: [.font: chipFont]).width
-        )
-        let measuredChipWidth = measuredTextWidth + chipHorizontalPadding * 2
-
-        if let imageView = thumbnailView {
-            let contentPadding = DesignTokens.Spacing.md
-            let maxChipWidth = max(120, imageView.frame.width)
-            let chipWidth = min(maxChipWidth, measuredChipWidth)
-            let newHeight = imageView.frame.height + contentPadding * 2 + chipVerticalGap + chipHeight
-
-            button.frame = NSRect(
-                x: contentPadding,
-                y: contentPadding,
-                width: chipWidth,
-                height: chipHeight
-            )
-            imageView.frame = NSRect(
-                x: contentPadding,
-                y: contentPadding + chipHeight + chipVerticalGap,
-                width: imageView.frame.width,
-                height: imageView.frame.height
-            )
-            resizeToastChrome(to: NSSize(width: frame.width, height: newHeight))
-
-            if button.superview == nil {
-                contentView.addSubview(button)
-            }
-
-            repositionKeepingBottomRight(contentSize: NSSize(width: frame.width, height: newHeight))
-        } else if let label = messageLabel {
-            applyMessageToastFolderChip(
-                destination: destination,
-                button: button,
-                label: label,
-                chipWidth: measuredChipWidth,
-                chipHeight: chipHeight
-            )
-        } else {
-            return
-        }
-
-        dismissalDuration = 8.0
-        restartDismissTimer()
-    }
-
-    /// Re-lays out a message toast as: folder chip (top) → status label → action button (bottom).
-    private func applyMessageToastFolderChip(
-        destination: CaptureDestination,
-        button: NSButton,
-        label: NSTextField,
-        chipWidth: CGFloat,
-        chipHeight: CGFloat
-    ) {
-        guard let contentView = backgroundView else { return }
-
-        let padding = ToastWindow.messagePadding
-        let rowGap: CGFloat = 6
-        let chipGap: CGFloat = 8
-        let labelSize = label.frame.size
-        let actionSize = messageActionButton?.frame.size ?? .zero
-        let contentWidth = max(
-            labelSize.width,
-            actionSize.width,
-            chipWidth
-        ) + padding.left + padding.right
-        let fittedChipWidth = min(contentWidth - padding.left - padding.right, chipWidth)
-        let newHeight = padding.top
-            + chipHeight
-            + chipGap
-            + labelSize.height
-            + rowGap
-            + actionSize.height
-            + padding.bottom
-
-        var y = padding.bottom
-        if let action = messageActionButton {
-            action.frame = NSRect(
-                x: (contentWidth - actionSize.width) / 2,
-                y: y,
-                width: actionSize.width,
-                height: actionSize.height
-            )
-            y += actionSize.height + rowGap
-        }
-
-        label.frame = NSRect(
-            x: (contentWidth - labelSize.width) / 2,
-            y: y,
-            width: labelSize.width,
-            height: labelSize.height
-        )
-        y += labelSize.height + chipGap
-
-        button.frame = NSRect(
-            x: (contentWidth - fittedChipWidth) / 2,
-            y: y,
-            width: fittedChipWidth,
-            height: chipHeight
-        )
-        setChipTitle(folderChipLabel(for: destination), on: button)
-
-        resizeToastChrome(to: NSSize(width: contentWidth, height: newHeight))
-        if button.superview == nil {
-            contentView.addSubview(button)
-        }
-
-        repositionKeepingBottomCenter(contentSize: NSSize(width: contentWidth, height: newHeight))
-    }
-
-    private func repositionKeepingBottomRight(contentSize: NSSize) {
-        guard let screen = NSScreen.main else { return }
-        let margin: CGFloat = 20
-        let visibleRect = screen.visibleFrame
-        let origin = NSPoint(
-            x: visibleRect.maxX - contentSize.width - margin,
-            y: visibleRect.minY + margin
-        )
-        setFrame(NSRect(origin: origin, size: contentSize), display: true)
-    }
-
-    private func repositionKeepingBottomCenter(contentSize: NSSize) {
-        setFrame(NSRect(origin: anchoredOrigin(for: contentSize), size: contentSize), display: true)
-    }
-
-    private func restartDismissTimer() {
-        dismissTimer?.invalidate()
-        dismissTimer = nil
-        dismissTimer = Timer.scheduledTimer(withTimeInterval: dismissalDuration, repeats: false) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.dismissAnimated()
-            }
-        }
-    }
-
-    private func makeFolderChipButton() -> NSButton {
-        let button = NSButton(title: "", target: self, action: #selector(handleChipTap))
-        button.isBordered = false
-        button.bezelStyle = .inline
-        button.font = NSFont.grabbit(.caption)
-        button.alignment = .center
-        button.imagePosition = .noImage
-        button.setButtonType(.momentaryChange)
-        button.wantsLayer = true
-        button.layer?.cornerRadius = DesignTokens.Radius.md
-        button.layer?.backgroundColor = DesignTokens.Color.panelHoverFill.cg
-        button.lineBreakMode = .byTruncatingTail
-        chipButton = button
-        return button
-    }
-
-    private func setChipTitle(_ title: String, on button: NSButton) {
-        button.attributedTitle = NSAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.grabbit(.caption),
-                .foregroundColor: DesignTokens.Color.textPrimary.ns,
-            ]
-        )
-    }
-
-    private func folderChipLabel(for destination: CaptureDestination) -> String {
-        if let subfolder = destination.subfolder, !subfolder.isEmpty {
-            return "→ \(destination.productFolder) / \(subfolder)"
-        }
-        return "→ \(destination.productFolder)"
-    }
-
-    @objc private func handleChipTap() {
-        chipAction?()
-        dismissAnimated()
     }
 
     @objc private func handleTap() {

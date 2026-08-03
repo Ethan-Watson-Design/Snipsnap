@@ -1,5 +1,5 @@
 {
-  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/SettingsWindow.swift",
+  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/App/SettingsWindow.swift",
   "tables": {
     "Localizable": [
       {
@@ -7,7 +7,7 @@
         "key": "Save to",
         "location": {
           "startingColumn": 22,
-          "startingLine": 168
+          "startingLine": 103
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Change…",
         "location": {
           "startingColumn": 24,
-          "startingLine": 177
+          "startingLine": 112
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Custom shortcuts coming soon",
         "location": {
           "startingColumn": 18,
-          "startingLine": 227
+          "startingLine": 162
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Open Accessibility Settings for Grabbit…",
         "location": {
           "startingColumn": 20,
-          "startingLine": 217
+          "startingLine": 152
         }
       }
     ]

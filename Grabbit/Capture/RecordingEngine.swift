@@ -427,7 +427,9 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
     // MARK: - SCStreamDelegate
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
+        #if DEBUG
         print("[RecordingEngine] Stream stopped with error: \(error)")
+        #endif
         streamRunning = false
         guard isRecording else { return }
         isRecording = false
@@ -441,7 +443,9 @@ class RecordingEngine: NSObject, SCStreamOutput, SCStreamDelegate,
         systemAudioInput?.markAsFinished()
         let url = outputURL
         assetWriter?.finishWriting {
+            #if DEBUG
             print("[RecordingEngine] File finalized after stream error: \(url?.lastPathComponent ?? "nil")")
+            #endif
             DispatchQueue.main.async { self.onRecordingStopped?(url) }
         }
     }

@@ -231,12 +231,6 @@ final class CaptureDestinationMappingCache {
 enum CaptureClassifier {
     private static let minimumConfidence = 0.5
 
-    /// Synchronous, cheap metadata gather — call at capture time before showing the toast.
-    static func gatherWindowInfo() -> WindowSignature {
-        let early = gatherEarlyCaptureSignals()
-        return WindowSignature(bundleID: early.bundleID, windowTitle: early.windowTitle)
-    }
-
     /// Frontmost app/window plus on-screen geometry snapshot — call before Grabbit UI takes focus.
     static func gatherEarlyCaptureSignals() -> EarlyCaptureSignals {
         let app = NSWorkspace.shared.frontmostApplication
@@ -269,11 +263,6 @@ enum CaptureClassifier {
     }
 
     /// Runs off the caller's cooperative thread pool; never blocks capture or surfaces errors.
-    ///
-    /// CaptureOrganizer integration point: after capture, the caller should start this in a
-    /// `Task` and, if a non-nil result arrives while `ToastWindow` is still visible (~4s),
-    /// pass it to `CaptureOrganizer.attachFolderSuggestion(toast:destination:fileURL:)` (TBD).
-    /// Results that arrive after dismiss are dropped silently.
     static func classify(image: NSImage, windowInfo: WindowSignature) async -> CaptureDestination? {
         await Task.detached(priority: .utility) {
             await classifyImpl(image: image, windowInfo: windowInfo)
@@ -289,11 +278,6 @@ enum CaptureClassifier {
         }.value
     }
 
-    /// Same pipeline as `suggestRenameAndProject` — named for preview Auto-Tag.
-    static func suggestTags(for request: CaptureSuggestionRequest) async -> RenameSuggestion? {
-        await suggestRenameAndProject(for: request)
-    }
-
     static func imageForClassification(from entry: CaptureEntry) -> NSImage? {
         switch entry.item {
         case .screenshot:
@@ -301,64 +285,6 @@ enum CaptureClassifier {
         case .recording(_, let thumbnail):
             return thumbnail
         }
-    }
-
-    /// Prints every signal used for folder suggestions when the user saves in the annotation window.
-    static func printSaveDiagnostics(image: NSImage, windowInfo: WindowSignature) async {
-        print("\n[Grabbit AutoOrganize] ── Classification inputs ──")
-        print("  bundleID:            \(windowInfo.bundleID ?? "nil")")
-        print("  windowTitle:         \(windowInfo.windowTitle ?? "nil")")
-        print("  dominantAppBundleID: \(windowInfo.dominantAppBundleID ?? "nil")")
-        print("  dominantAppName:     \(windowInfo.dominantAppName ?? "nil")")
-        print("  resolvedProjectName: \(windowInfo.resolvedProjectName ?? "nil")")
-
-        if let cached = CaptureDestinationMappingCache.shared.destination(for: windowInfo) {
-            let sub = cached.subfolder.map { " / \($0)" } ?? ""
-            print("  mapping cache:       HIT → \(cached.productFolder)\(sub) [\(cached.source.rawValue)]")
-        } else {
-            print("  mapping cache:       miss")
-        }
-
-        let ocrText = await recognizeText(in: image)
-        let ocrLines = ocrText
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        print("  OCR lines (\(ocrLines.count) from saved screenshot):")
-        if ocrLines.isEmpty {
-            print("    (none)")
-        } else {
-            for (index, line) in ocrLines.prefix(40).enumerated() {
-                print("    [\(index + 1)] \(line)")
-            }
-            if ocrLines.count > 40 {
-                print("    … \(ocrLines.count - 40) more lines")
-            }
-        }
-
-        if let heading = extractHeading(from: ocrText) {
-            print("  OCR heading pick:    \"\(heading)\"")
-        } else {
-            print("  OCR heading pick:    none")
-        }
-
-        let rulesProduct = resolveProductFolder(from: windowInfo)
-        let rulesSubfolder = inferSubfolder(
-            windowInfo: windowInfo,
-            ocrText: ocrText,
-            productFolder: rulesProduct
-        )
-        print("  rules productFolder: \(rulesProduct ?? "nil")")
-        print("  rules subfolder:     \(rulesSubfolder ?? "nil")")
-
-        if let rules = classifyWithRules(windowInfo: windowInfo, ocrText: ocrText) {
-            let sub = rules.subfolder.map { " / \($0)" } ?? ""
-            print("  rules suggestion:    \(rules.productFolder)\(sub) [\(rules.source.rawValue), conf \(rules.confidence)]")
-        } else {
-            print("  rules suggestion:    nil")
-        }
-        print("[Grabbit AutoOrganize] ─────────────────────────────\n")
     }
 
     // MARK: - Pipeline

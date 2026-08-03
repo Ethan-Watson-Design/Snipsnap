@@ -5,6 +5,7 @@
 //  Shared tag chips + add-tag control for Capture Library preview.
 //
 
+import AppKit
 import SwiftUI
 
 struct CaptureTagBar: View {
@@ -341,6 +342,204 @@ enum SoftControlDropdownChrome {
     }
 }
 
+/// Plain AppKit field for soft controls — same insets while idle and editing,
+/// so clicking doesn't nudge the text sideways.
+private struct SoftControlPlainTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var textColor: NSColor
+    var isEditable: Bool
+    @Binding var isFocused: Bool
+    var onSubmit: () -> Void
+    var onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> SoftControlNSTextField {
+        let field = SoftControlNSTextField(string: text)
+        field.configureChrome()
+        field.font = NSFont.grabbit(.caption)
+        field.textColor = textColor
+        field.placeholderString = placeholder
+        field.isEditable = isEditable
+        field.isSelectable = isEditable
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.submit(_:))
+        field.onEscape = { [weak coordinator = context.coordinator] in
+            coordinator?.cancel(from: field)
+        }
+        field.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ nsView: SoftControlNSTextField, context: Context) {
+        context.coordinator.parent = self
+        nsView.placeholderString = placeholder
+        nsView.textColor = textColor
+        nsView.isEditable = isEditable
+        nsView.isSelectable = isEditable
+
+        if nsView.stringValue != text, nsView.currentEditor() == nil {
+            nsView.stringValue = text
+        }
+
+        let editorIsFirstResponder = nsView.currentEditor() != nil
+            && nsView.window?.firstResponder === nsView.currentEditor()
+
+        if isFocused, isEditable, !editorIsFirstResponder {
+            DispatchQueue.main.async {
+                guard context.coordinator.parent.isFocused else { return }
+                nsView.window?.makeFirstResponder(nsView)
+            }
+        } else if !isFocused, editorIsFirstResponder {
+            context.coordinator.isCancelling = true
+            nsView.window?.makeFirstResponder(nil)
+            context.coordinator.isCancelling = false
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: SoftControlPlainTextField
+        var isCancelling = false
+        private var skipNextEndEditingCommit = false
+
+        init(parent: SoftControlPlainTextField) {
+            self.parent = parent
+        }
+
+        @objc func submit(_ sender: NSTextField) {
+            parent.text = sender.stringValue
+            parent.onSubmit()
+            skipNextEndEditingCommit = true
+            sender.window?.makeFirstResponder(nil)
+            parent.isFocused = false
+        }
+
+        func cancel(from field: NSTextField) {
+            isCancelling = true
+            parent.onCancel()
+            field.stringValue = parent.text
+            field.window?.makeFirstResponder(nil)
+            isCancelling = false
+            parent.isFocused = false
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            parent.isFocused = true
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            defer { skipNextEndEditingCommit = false }
+            guard let field = obj.object as? NSTextField else { return }
+            if isCancelling || skipNextEndEditingCommit {
+                parent.isFocused = false
+                return
+            }
+            parent.text = field.stringValue
+            parent.isFocused = false
+            parent.onSubmit()
+        }
+    }
+}
+
+private final class SoftControlNSTextField: NSTextField {
+    var onEscape: (() -> Void)?
+
+    override class var cellClass: AnyClass? {
+        get { SoftControlTextFieldCell.self }
+        set {}
+    }
+
+    func configureChrome() {
+        isBordered = false
+        isBezeled = false
+        drawsBackground = false
+        focusRingType = .none
+        if let cell = cell as? SoftControlTextFieldCell {
+            cell.isScrollable = true
+            cell.wraps = false
+            cell.usesSingleLineMode = true
+            cell.lineBreakMode = .byTruncatingTail
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+}
+
+/// Drawing and editing share one rect so the glyphs don't jump on focus.
+private final class SoftControlTextFieldCell: NSTextFieldCell {
+    override func drawingRect(forBounds rect: NSRect) -> NSRect {
+        alignedRect(for: rect)
+    }
+
+    override func edit(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor textObj: NSText,
+        delegate: Any?,
+        event: NSEvent?
+    ) {
+        super.edit(
+            withFrame: alignedRect(for: rect),
+            in: controlView,
+            editor: textObj,
+            delegate: delegate,
+            event: event
+        )
+        zeroFieldEditorInsets(textObj)
+    }
+
+    override func select(
+        withFrame rect: NSRect,
+        in controlView: NSView,
+        editor textObj: NSText,
+        delegate: Any?,
+        start selStart: Int,
+        length selLength: Int
+    ) {
+        super.select(
+            withFrame: alignedRect(for: rect),
+            in: controlView,
+            editor: textObj,
+            delegate: delegate,
+            start: selStart,
+            length: selLength
+        )
+        zeroFieldEditorInsets(textObj)
+    }
+
+    private func alignedRect(for rect: NSRect) -> NSRect {
+        var result = rect
+        let textHeight = ceil(font?.ascender ?? 0) - floor(font?.descender ?? 0)
+        if result.height > textHeight {
+            result.origin.y += floor((result.height - textHeight) / 2)
+            result.size.height = textHeight
+        }
+        return result
+    }
+
+    private func zeroFieldEditorInsets(_ textObj: NSText) {
+        guard let editor = textObj as? NSTextView else { return }
+        editor.textContainerInset = .zero
+        editor.textContainer?.lineFragmentPadding = 0
+    }
+}
+
 /// Auto-Tag rename suggestion: "Suggesting" label outside neutral soft-control name field.
 struct SuggestedNameField: View {
     let name: String
@@ -386,6 +585,7 @@ struct SuggestedNameField: View {
                 .contentShape(Rectangle())
                 .onTapGesture { isFocused = true }
                 .focused($isFocused)
+                .focusEffectDisabled()
                 .onSubmit(commitDraft)
                 .onExitCommand {
                     syncDraft()
@@ -444,7 +644,7 @@ struct TagKindDropdown: View {
     @State private var draft = ""
     @State private var isHovered = false
     @State private var isMenuPresented = false
-    @FocusState private var isFocused: Bool
+    @State private var isFocused = false
 
     private var borderColor: Color {
         emphasized
@@ -456,6 +656,12 @@ struct TagKindDropdown: View {
         isReadOnly
             ? DesignTokens.Color.textSecondary.swiftUI
             : DesignTokens.Color.textPrimary.swiftUI
+    }
+
+    private var labelForegroundNS: NSColor {
+        isReadOnly
+            ? DesignTokens.Color.textSecondary.ns
+            : DesignTokens.Color.textPrimary.ns
     }
 
     private var isEmptySelection: Bool {
@@ -547,8 +753,6 @@ struct TagKindDropdown: View {
         .onChange(of: isFocused) { _, focused in
             if focused {
                 draft = isEmptySelection ? "" : selected
-            } else {
-                commitDraft()
             }
         }
         .onChange(of: isReadOnly) { _, readOnly in
@@ -572,18 +776,20 @@ struct TagKindDropdown: View {
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(labelForeground)
 
-            TextField(placeholder, text: $draft)
-                .textFieldStyle(.plain)
-                .font(.grabbit(.caption))
-                .foregroundStyle(labelForeground)
-                .frame(minWidth: 48, maxWidth: 160, alignment: .leading)
-                .fixedSize(horizontal: true, vertical: false)
-                .focused($isFocused)
-                .onSubmit(commitDraft)
-                .onExitCommand {
+            SoftControlPlainTextField(
+                text: $draft,
+                placeholder: placeholder,
+                textColor: labelForegroundNS,
+                isEditable: !isReadOnly,
+                isFocused: $isFocused,
+                onSubmit: commitDraft,
+                onCancel: {
                     syncDraftFromSelected()
                     isFocused = false
                 }
+            )
+            .frame(minWidth: 48, maxWidth: 160, alignment: .leading)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .font(.grabbit(.caption))
         .padding(.leading, 10)

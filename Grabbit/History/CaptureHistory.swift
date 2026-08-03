@@ -223,12 +223,20 @@ final class CaptureHistory {
     private var storedCaptures: [StoredCapture] = []
     /// Full-resolution screenshot cache. Entries themselves only keep list thumbnails.
     private let fullImageCache = NSCache<NSUUID, NSImage>()
+    /// Coalesces overlapping folder scans (launch + Library + Settings).
+    private var reconcileTask: Task<Void, Never>?
 
     private(set) var entries: [CaptureEntry] = []
 
     /// Captures whose files live under the current Settings save folder (including project subfolders).
     var entriesInSaveRoot: [CaptureEntry] {
-        entries.filter { isUnderSaveRoot(id: $0.id) }
+        let scoped = entries.filter { isUnderSaveRoot(id: $0.id) }
+        // If the save-folder preference failed to load (Desktop fallback), scoped is empty
+        // even though history still has real captures — don't hide them from Recents/Library.
+        if scoped.isEmpty, !entries.isEmpty, !AppSettings.hasConfiguredDestinationFolder {
+            return entries
+        }
+        return scoped
     }
 
     var recents: [CaptureItem] { entriesInSaveRoot.map(\.item) }
@@ -269,7 +277,7 @@ final class CaptureHistory {
 
     private static func rewritingLegacyAppSupportPaths(in entry: StoredCapture) -> StoredCapture {
         let path = rewritingLegacyAppSupportPath(entry.path)
-        let thumbnailPath = entry.thumbnailPath.map(rewritingLegacyAppSupportPath)
+        let thumbnailPath = entry.thumbnailPath.map { rewritingLegacyAppSupportPath($0) }
         guard path != entry.path || thumbnailPath != entry.thumbnailPath else { return entry }
         return StoredCapture(
             id: entry.id,
@@ -703,26 +711,6 @@ final class CaptureHistory {
         }
     }
 
-    /// Upserts project/flow tags from an Auto-Tag accept batch.
-    @discardableResult
-    func applyTagSuggestion(
-        id: UUID,
-        project: String?,
-        flow: String?
-    ) -> Bool {
-        var ok = true
-
-        if let project, !CaptureTag.normalizeName(project).isEmpty {
-            ok = setProjectTag(id: id, name: project) && ok
-        }
-
-        if let flow {
-            _ = addTag(id: id, kind: .flow, name: flow)
-        }
-
-        return ok
-    }
-
     /// Aligns the project tag with the capture's current parent folder (after moves / reverts).
     func syncProjectTagFromFolder(id: UUID) {
         guard let parent = parentDirectoryURL(for: id) else { return }
@@ -855,7 +843,12 @@ final class CaptureHistory {
                 didMutateStored = true
             }
 
-            guard let item = captureItem(from: resolved) else { continue }
+            guard let item = captureItem(from: resolved) else {
+                // Keep unreachable rows (iCloud still hydrating, temporary unmount).
+                // Dropping them here permanently empties Recents after a restart blip.
+                validStored.append(resolved)
+                continue
+            }
 
             // Backfill missing thumbnails so relaunch stays cheap and avoids
             // regenerating frames from video on every launch.
@@ -956,6 +949,142 @@ final class CaptureHistory {
             guard let thumb = recordingThumbnail(for: url) else { return nil }
             return .recording(url: url, thumbnail: thumb)
         }
+    }
+
+    /// Async variant used by folder ingest so video frame extracts don't stall the main actor.
+    private func captureItemAsync(from entry: StoredCapture) async -> CaptureItem? {
+        let fileManager = FileManager.default
+
+        switch entry.kind {
+        case .screenshot:
+            return captureItem(from: entry)
+
+        case .recording:
+            let url = URL(fileURLWithPath: entry.path)
+            guard fileManager.fileExists(atPath: url.path) else { return nil }
+
+            if let thumbPath = entry.thumbnailPath,
+               fileManager.fileExists(atPath: thumbPath),
+               let thumb = NSImage(contentsOf: URL(fileURLWithPath: thumbPath)) {
+                return .recording(url: url, thumbnail: thumb)
+            }
+
+            guard let thumb = await recordingThumbnailAsync(for: url) else { return nil }
+            return .recording(url: url, thumbnail: thumb)
+        }
+    }
+
+    /// Picks up capture files that already sit under the current destination folder
+    /// but were never added through the app — e.g. the user just switched Settings to
+    /// a folder that already has screenshots/recordings in it (moved in via Finder, or
+    /// captures made in an earlier session that aged out of the in-memory history).
+    /// Without this, switching the save location wouldn't make the Library reflect what's
+    /// actually in that folder until those files were touched by the app again.
+    ///
+    /// Runs off the interactive path: video frame extracts must not block the main actor
+    /// (Show All used to freeze while ingesting dozens of unindexed recordings).
+    func scheduleReconcileWithDisk() {
+        guard reconcileTask == nil else { return }
+        reconcileTask = Task { @MainActor in
+            defer { reconcileTask = nil }
+            let didAdd = await self.reconcileWithDiskAsync()
+            if didAdd {
+                NotificationCenter.default.post(name: .captureHistoryDidChange, object: self)
+            }
+        }
+    }
+
+    /// Sync wrapper for older call sites — schedules async ingest and returns immediately.
+    @discardableResult
+    func reconcileWithDisk() -> Bool {
+        scheduleReconcileWithDisk()
+        return false
+    }
+
+    private func reconcileWithDiskAsync() async -> Bool {
+        // A recording in progress writes straight into the destination folder as it
+        // grows — scanning mid-write would add a broken/duplicate entry for a file
+        // `CaptureHistory.add` is about to claim properly once it finishes.
+        guard !RecordingEngine.shared.isRecording else { return false }
+
+        let root = AppSettings.destinationFolderURL
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue,
+              let enumerator = fileManager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey, .creationDateKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return false
+        }
+
+        var knownPaths = Set(storedCaptures.map { URL(fileURLWithPath: $0.path).standardizedFileURL.path })
+        var didAdd = false
+
+        // Avoid for-in: DirectoryEnumerator.makeIterator is unavailable in async (Swift 6).
+        while let url = enumerator.nextObject() as? URL {
+            if Task.isCancelled { break }
+
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .creationDateKey])
+            if values?.isDirectory == true { continue }
+
+            let standardized = url.standardizedFileURL
+            guard !knownPaths.contains(standardized.path) else { continue }
+
+            let kind: StoredCapture.Kind
+            switch url.pathExtension.lowercased() {
+            case "png", "jpg", "jpeg": kind = .screenshot
+            case "mp4", "mov": kind = .recording
+            default: continue
+            }
+
+            // Let the Library / menu paint between video frame extracts.
+            await Task.yield()
+
+            let createdAt = values?.creationDate ?? Date()
+            let provisional = StoredCapture(
+                id: UUID(),
+                createdAt: createdAt,
+                kind: kind,
+                path: standardized.path,
+                thumbnailPath: nil,
+                customName: nil,
+                tags: []
+            )
+            guard let item = await captureItemAsync(from: provisional) else { continue }
+
+            let stored = synthesizeProjectTagIfNeeded(for: StoredCapture(
+                id: provisional.id,
+                createdAt: provisional.createdAt,
+                kind: provisional.kind,
+                path: provisional.path,
+                thumbnailPath: saveThumbnail(item.thumbnail)?.path,
+                customName: nil,
+                tags: []
+            ))
+
+            storedCaptures.append(stored)
+            entries.append(
+                CaptureEntry(
+                    id: stored.id,
+                    createdAt: stored.createdAt,
+                    item: item,
+                    customName: stored.customName,
+                    tags: stored.tags
+                )
+            )
+            knownPaths.insert(standardized.path)
+            didAdd = true
+        }
+
+        guard didAdd else { return false }
+
+        // Keep the newest-first ordering used everywhere else in history.
+        storedCaptures.sort { $0.createdAt > $1.createdAt }
+        entries.sort { $0.createdAt > $1.createdAt }
+        persist()
+        return true
     }
 
     private func trimAndPersist() {
@@ -1092,6 +1221,20 @@ final class CaptureHistory {
         semaphore.wait()
         guard let cgImage = result.cgImage else { return nil }
         return NSImage(cgImage: cgImage, size: .zero)
+    }
+
+    private func recordingThumbnailAsync(for url: URL) async -> NSImage? {
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .positiveInfinity
+        generator.requestedTimeToleranceAfter = .positiveInfinity
+        do {
+            let (cgImage, _) = try await generator.image(at: .zero)
+            return NSImage(cgImage: cgImage, size: .zero)
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Downsampling

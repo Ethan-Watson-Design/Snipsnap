@@ -164,6 +164,8 @@ enum DesignTokens {
         static let surfaceElevated = dynamicNeutral(.t100, .t1000)
         /// Floating / elevated panel surface (toast, annotation chrome).
         static let panelSurface = dynamicNeutral(.t100, .t900)
+        /// Solid dark toast chrome (Capture Bar hover labels).
+        static let toastDarkFill = TokenColor(ns: Palette.neutral[.t900].ns)
         /// Selected list / nav / chip fill.
         static let listSelectionFill = dynamicNeutral(.t300, .t900)
         /// Soft bordered control fill (Group by, Auto-Tag, project/flow dropdowns).
@@ -171,9 +173,9 @@ enum DesignTokens {
         /// Hover / pressed variant of `softControlFill`.
         static let softControlFillHovered = dynamicNeutral(.t300, .t900)
         /// Hover fill on dark HUD chrome (Capture Bar mode buttons).
-        static let panelHoverFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.10))
+        static let panelHoverFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.14))
         /// Active fill on dark HUD chrome.
-        static let panelActiveFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.14))
+        static let panelActiveFill = TokenColor(ns: Palette.neutral[.t100].ns.withAlphaComponent(0.18))
 
         // MARK: Borders
 

@@ -1,5 +1,5 @@
 {
-  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/CaptureLibraryWindow.swift",
+  "source": "/Users/ethanwatson/CustomApps/Grabbit/Grabbit/Library/CaptureLibraryWindow.swift",
   "tables": {
     "Localizable": [
       {
@@ -7,7 +7,7 @@
         "key": "New Project",
         "location": {
           "startingColumn": 16,
-          "startingLine": 826
+          "startingLine": 841
         }
       },
       {
@@ -15,7 +15,7 @@
         "key": "Custom Flow",
         "location": {
           "startingColumn": 16,
-          "startingLine": 843
+          "startingLine": 858
         }
       },
       {
@@ -23,7 +23,7 @@
         "key": "Drag to resize",
         "location": {
           "startingColumn": 15,
-          "startingLine": 955
+          "startingLine": 970
         }
       },
       {
@@ -31,7 +31,7 @@
         "key": "Project name",
         "location": {
           "startingColumn": 23,
-          "startingLine": 827
+          "startingLine": 842
         }
       },
       {
@@ -39,7 +39,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 828
+          "startingLine": 843
         }
       },
       {
@@ -47,7 +47,7 @@
         "key": "Create",
         "location": {
           "startingColumn": 20,
-          "startingLine": 831
+          "startingLine": 846
         }
       },
       {
@@ -55,7 +55,7 @@
         "key": "Flow name",
         "location": {
           "startingColumn": 23,
-          "startingLine": 844
+          "startingLine": 859
         }
       },
       {
@@ -63,7 +63,7 @@
         "key": "Cancel",
         "location": {
           "startingColumn": 20,
-          "startingLine": 845
+          "startingLine": 860
         }
       },
       {
@@ -71,23 +71,7 @@
         "key": "Create",
         "location": {
           "startingColumn": 20,
-          "startingLine": 848
-        }
-      },
-      {
-        "comment": "",
-        "key": "Screenshots and recordings will appear here.",
-        "location": {
-          "startingColumn": 39,
-          "startingLine": 973
-        }
-      },
-      {
-        "comment": "",
-        "key": "No Captures Yet",
-        "location": {
-          "startingColumn": 21,
-          "startingLine": 971
+          "startingLine": 863
         }
       },
       {
@@ -95,7 +79,7 @@
         "key": "Select a Capture",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1178
+          "startingLine": 1188
         }
       },
       {
@@ -103,7 +87,7 @@
         "key": "Choose a screenshot or recording from the sidebar.",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1182
+          "startingLine": 1192
         }
       },
       {
@@ -111,7 +95,7 @@
         "key": "Move to Trash",
         "location": {
           "startingColumn": 20,
-          "startingLine": 1264
+          "startingLine": 1274
         }
       },
       {
@@ -119,7 +103,7 @@
         "key": "Auto-Rename",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1251
+          "startingLine": 1261
         }
       },
       {
@@ -127,7 +111,7 @@
         "key": "Show in Finder",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1256
+          "startingLine": 1266
         }
       },
       {
@@ -135,7 +119,7 @@
         "key": "Rename",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1261
+          "startingLine": 1271
         }
       },
       {
@@ -143,7 +127,7 @@
         "key": "Organized",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1713
+          "startingLine": 1724
         }
       },
       {
@@ -151,7 +135,7 @@
         "key": "Revert rename and move",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1723
+          "startingLine": 1734
         }
       },
       {
@@ -159,7 +143,7 @@
         "key": "Auto-Tag",
         "location": {
           "startingColumn": 18,
-          "startingLine": 1759
+          "startingLine": 1770
         }
       },
       {
@@ -167,7 +151,7 @@
         "key": "%lld selected",
         "location": {
           "startingColumn": 22,
-          "startingLine": 1810
+          "startingLine": 1821
         }
       },
       {
@@ -175,7 +159,7 @@
         "key": "Auto-tagging…",
         "location": {
           "startingColumn": 38,
-          "startingLine": 1823
+          "startingLine": 1834
         }
       },
       {
@@ -183,7 +167,7 @@
         "key": "Auto-Tag",
         "location": {
           "startingColumn": 58,
-          "startingLine": 1823
+          "startingLine": 1834
         }
       },
       {
@@ -191,7 +175,7 @@
         "key": "Auto-tagging…",
         "location": {
           "startingColumn": 23,
-          "startingLine": 1992
+          "startingLine": 2003
         }
       },
       {
@@ -199,20 +183,12 @@
         "key": "Revert rename and move",
         "location": {
           "startingColumn": 19,
-          "startingLine": 2027
+          "startingLine": 2038
         }
       },
       {
         "comment": "",
         "key": "Accept suggestion",
-        "location": {
-          "startingColumn": 23,
-          "startingLine": 2004
-        }
-      },
-      {
-        "comment": "",
-        "key": "Dismiss suggestion",
         "location": {
           "startingColumn": 23,
           "startingLine": 2015
@@ -220,10 +196,18 @@
       },
       {
         "comment": "",
+        "key": "Dismiss suggestion",
+        "location": {
+          "startingColumn": 23,
+          "startingLine": 2026
+        }
+      },
+      {
+        "comment": "",
         "key": "Auto-tagging…",
         "location": {
           "startingColumn": 36,
-          "startingLine": 2212
+          "startingLine": 2221
         }
       },
       {
@@ -231,7 +215,7 @@
         "key": "Auto-Tag",
         "location": {
           "startingColumn": 56,
-          "startingLine": 2212
+          "startingLine": 2221
         }
       },
       {
@@ -239,15 +223,7 @@
         "key": "No tags suggested",
         "location": {
           "startingColumn": 18,
-          "startingLine": 2302
-        }
-      },
-      {
-        "comment": "",
-        "key": "Annotate",
-        "location": {
-          "startingColumn": 20,
-          "startingLine": 2288
+          "startingLine": 2299
         }
       },
       {
@@ -255,7 +231,7 @@
         "key": "Accept suggestion",
         "location": {
           "startingColumn": 19,
-          "startingLine": 2365
+          "startingLine": 2362
         }
       },
       {
@@ -263,7 +239,7 @@
         "key": "Dismiss suggestion",
         "location": {
           "startingColumn": 19,
-          "startingLine": 2376
+          "startingLine": 2373
         }
       }
     ]

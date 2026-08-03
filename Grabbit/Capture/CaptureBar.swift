@@ -7,6 +7,7 @@ import AppKit
 import AVFoundation
 import CoreImage
 import ScreenCaptureKit
+import SwiftUI
 
 // MARK: - CaptureBarStyle
 
@@ -122,47 +123,34 @@ private final class CaptureBarModeButton: NSControl {
     }
 
     private let actionTitle: String
-    private let showsLabel: Bool
     private let highlightLayer = CALayer()
     private let recordingDotLayer = CALayer()
     private let iconView = NSImageView()
-    private let labelField = NSTextField(labelWithString: "")
     private var isHovered = false
 
     init(mode: CaptureMode, sfSymbol: String, label: String) {
         self.mode = mode
         self.actionTitle = label
-        self.showsLabel = !mode.isRecording
         super.init(frame: .zero)
         wantsLayer = true
+        // Hover labels use ToastWindow; skip the system tooltip so they don't double up.
         highlightLayer.cornerRadius = CaptureBarStyle.hoverCornerRadius
         layer?.addSublayer(highlightLayer)
 
-        let cfg = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+        let cfg = NSImage.SymbolConfiguration(pointSize: 24, weight: .regular)
         iconView.image = NSImage(systemSymbolName: sfSymbol, accessibilityDescription: label)?
             .withSymbolConfiguration(cfg)
         iconView.imageScaling = .scaleProportionallyDown
         iconView.contentTintColor = .labelColor
 
-        labelField.stringValue = label
-        labelField.font = NSFont.grabbit(.caption)
-        labelField.alignment = .center
-        labelField.textColor = .labelColor
-        labelField.isBezeled = false
-        labelField.isEditable = false
-        labelField.drawsBackground = false
-        labelField.isSelectable = false
-        labelField.isHidden = !showsLabel
-
         if mode.isRecording {
-            recordingDotLayer.backgroundColor = NSColor.systemRed.cgColor
-            recordingDotLayer.cornerRadius = 3
+            recordingDotLayer.backgroundColor = NSColor.secondaryLabelColor.cgColor
+            recordingDotLayer.cornerRadius = 4
             layer?.addSublayer(recordingDotLayer)
         }
 
         setAccessibilityLabel(label)
         addSubview(iconView)
-        addSubview(labelField)
         updateLook()
     }
 
@@ -186,63 +174,50 @@ private final class CaptureBarModeButton: NSControl {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         updateLook()
-        if mode.isRecording {
-            ToastWindow.show(message: actionTitle)
-        }
+        guard let window else { return }
+        let buttonScreen = window.convertToScreen(convert(bounds, to: nil))
+        // Sit above the full bar chrome (including options row), centered on this button.
+        let anchor = NSRect(
+            x: buttonScreen.minX,
+            y: window.frame.maxY,
+            width: buttonScreen.width,
+            height: 0
+        )
+        ToastWindow.show(
+            message: actionTitle,
+            aboveScreenRect: anchor,
+            chrome: .darkNeutral,
+            hostWindow: window,
+            autoDismiss: false
+        )
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
         updateLook()
+        ToastWindow.dismissCurrent()
     }
 
     override func layout() {
         super.layout()
 
-        let iconSide: CGFloat = 18
-        let gap = DesignTokens.Spacing.xs
-
-        if showsLabel {
-            let font = labelField.font ?? NSFont.grabbit(.caption)
-            // Caption is 14pt — hardcoding 12 clipped glyphs at the baseline.
-            let labelH = ceil(font.ascender - font.descender + font.leading)
-            let contentH = iconSide + gap + labelH
-            let originY = max(DesignTokens.Spacing.xs, (bounds.height - contentH) / 2)
-
-            labelField.frame = NSRect(
-                x: DesignTokens.Spacing.xs,
-                y: originY,
-                width: bounds.width - DesignTokens.Spacing.sm,
-                height: labelH
-            )
-            iconView.frame = NSRect(
-                x: (bounds.width - iconSide) / 2,
-                y: labelField.frame.maxY + gap,
-                width: iconSide,
-                height: iconSide
-            )
-
-            let contentRect = iconView.frame.union(labelField.frame)
-            highlightLayer.frame = contentRect
-                .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
-                .intersection(bounds.insetBy(dx: 2, dy: 2))
-        } else {
-            iconView.frame = NSRect(
-                x: (bounds.width - iconSide) / 2,
-                y: (bounds.height - iconSide) / 2,
-                width: iconSide,
-                height: iconSide
-            )
-            highlightLayer.frame = iconView.frame
-                .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
-                .intersection(bounds.insetBy(dx: 2, dy: 2))
-        }
+        let iconSide: CGFloat = 28
+        iconView.frame = NSRect(
+            x: (bounds.width - iconSide) / 2,
+            y: (bounds.height - iconSide) / 2,
+            width: iconSide,
+            height: iconSide
+        )
+        highlightLayer.frame = iconView.frame
+            .insetBy(dx: -CaptureBarStyle.hoverPadding, dy: -CaptureBarStyle.hoverPadding)
+            .intersection(bounds.insetBy(dx: 2, dy: 2))
 
         if mode.isRecording {
-            let dot: CGFloat = 6
+            let dot: CGFloat = 8
+            // Overlap the bottom-right corner of the mode icon.
             recordingDotLayer.frame = NSRect(
-                x: iconView.frame.maxX - 2,
-                y: iconView.frame.maxY - 4,
+                x: iconView.frame.maxX - dot + 1,
+                y: iconView.frame.minY - 1,
                 width: dot,
                 height: dot
             )
@@ -385,55 +360,19 @@ private final class CaptureBarMediaButton: NSControl {
     }
 }
 
-// MARK: - CaptureBarPrimaryButton
+// MARK: - CaptureBarActionButton
 
-private final class CaptureBarPrimaryButton: NSButton {
-    private var isHovered = false
+/// Primary Capture / Record control — same `GrabbitButtonStyle` as Kitchen Sink / View All.
+private struct CaptureBarActionButton: View {
+    let title: String
+    let isEnabled: Bool
+    let action: () -> Void
 
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach { removeTrackingArea($0) }
-        addTrackingArea(NSTrackingArea(
-            rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways],
-            owner: self,
-            userInfo: nil
-        ))
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        isHovered = true
-        updateHoverLook()
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        isHovered = false
-        updateHoverLook()
-    }
-
-    override var isEnabled: Bool {
-        didSet { updateHoverLook() }
-    }
-
-    override func layout() {
-        super.layout()
-        updateHoverLook()
-    }
-
-    private func updateHoverLook() {
-        guard wantsLayer else { return }
-        if !isEnabled {
-            layer?.backgroundColor = NSColor.systemBlue.withAlphaComponent(0.45).cgColor
-        } else if isHovered {
-            layer?.backgroundColor = NSColor.systemBlue.blended(withFraction: 0.12, of: .white)?.cgColor
-                ?? NSColor.systemBlue.cgColor
-        } else {
-            layer?.backgroundColor = NSColor.systemBlue.cgColor
-        }
+    var body: some View {
+        Button(title, action: action)
+            .buttonStyle(.grabbitProminent)
+            .disabled(!isEnabled)
+            .fixedSize()
     }
 }
 
@@ -543,7 +482,7 @@ final class CaptureBar: NSPanel {
     /// True while the capture bar is intentionally on screen (set before async preview work).
     private(set) static var isPresented = false
 
-    /// Frontmost app/window captured at the moment the bar is invoked (⌘6), before Grabbit's
+    /// Frontmost app/window captured at the moment the bar is invoked (⌘⇧5), before Grabbit's
     /// own panel steals focus. Auto-Organize classification must use this, not a fresh
     /// `NSWorkspace.shared.frontmostApplication` read taken after capture — by then Grabbit
     /// itself is frontmost and classification would describe Grabbit instead of the source app.
@@ -557,14 +496,15 @@ final class CaptureBar: NSPanel {
     }
 
     private var modeButtons: [(CaptureMode, CaptureBarModeButton)] = []
-    private weak var captureButton: NSButton?
+    private var captureButtonHosting: NSHostingView<CaptureBarActionButton>?
+    private var captureButtonTitle = "Capture"
+    private var captureButtonIsEnabled = true
     private weak var systemAudioButton: CaptureBarMediaButton?
     private weak var micButton: CaptureBarMediaButton?
     private weak var optionsMediaSeparator: NSBox?
     private var escapeGlobalMonitor: Any?
     private var escapeLocalMonitor: Any?
 
-    /// Tall enough for 14pt caption labels under mode icons without clipping.
     private let barHeight: CGFloat = 72
     private let pickerRowHeight: CGFloat = 44
     private let pickerGap: CGFloat = 6
@@ -733,7 +673,6 @@ final class CaptureBar: NSPanel {
         let btnW:       CGFloat = 58
         let btnH:       CGFloat = 56
         let hPad = Self.computeBarLayout().horizontalPad
-        let captureH:   CGFloat = 30
         let sepPad:     CGFloat = 8
         let sepW:       CGFloat = 1
         let toggleW:    CGFloat = Self.mediaToggleW
@@ -866,38 +805,47 @@ final class CaptureBar: NSPanel {
             x += sepW + sepPad
         }
 
-        let capBtn = CaptureBarPrimaryButton(frame: .zero)
-        capBtn.title = "Capture"
-        capBtn.isBordered = false
-        capBtn.font = NSFont.grabbit(.bodyEmphasized)
-        capBtn.wantsLayer = true
-        capBtn.layer?.cornerRadius = captureH / 2
-        capBtn.contentTintColor = NSColor.white
-        capBtn.target = self
-        capBtn.action = #selector(captureTapped)
-        vfx.addSubview(capBtn)
-        captureButton = capBtn
+        let hosting = NSHostingView(rootView: makeCaptureActionButton())
+        hosting.sizingOptions = [.intrinsicContentSize]
+        vfx.addSubview(hosting)
+        captureButtonHosting = hosting
 
         layoutMainBar()
         updateMediaButtonAppearances()
         refreshSelection()
     }
 
+    private func makeCaptureActionButton() -> CaptureBarActionButton {
+        CaptureBarActionButton(
+            title: captureButtonTitle,
+            isEnabled: captureButtonIsEnabled,
+            action: { [weak self] in self?.captureTapped() }
+        )
+    }
+
+    private func reloadCaptureActionButton() {
+        captureButtonHosting?.rootView = makeCaptureActionButton()
+        layoutMainBar()
+    }
+
     private func layoutMainBar() {
         let barH = barHeight
         let hPad = Self.computeBarLayout().horizontalPad
-        let captureW: CGFloat = 82
-        let captureH: CGFloat = 30
         let totalW = barWidth
 
         barEffectView?.frame = NSRect(x: 0, y: 0, width: totalW, height: barH)
         rootView?.frame.size.width = totalW
 
-        captureButton?.frame = CGRect(
-            x: totalW - hPad - captureW,
-            y: (barH - captureH) / 2,
-            width: captureW,
-            height: captureH
+        guard let hosting = captureButtonHosting else { return }
+        hosting.layoutSubtreeIfNeeded()
+        let size = hosting.fittingSize
+        let width = max(size.width, 1)
+        let height = max(size.height, 1)
+        hosting.frame = CGRect(
+            x: totalW - hPad - width,
+            y: (barH - height) / 2,
+            width: width,
+            height: height
         )
     }
 
@@ -1266,14 +1214,18 @@ final class CaptureBar: NSPanel {
     }
 
     private func updateCaptureButtonState() {
+        let enabled: Bool
         switch selectedMode {
         case .screenshotRegion, .recordRegion:
-            captureButton?.isEnabled = selectedRegionRect != nil
+            enabled = selectedRegionRect != nil
         case .screenshotWindow, .recordWindow:
-            captureButton?.isEnabled = selectedRecordWindowID != nil
+            enabled = selectedRecordWindowID != nil
         default:
-            captureButton?.isEnabled = true
+            enabled = true
         }
+        guard captureButtonIsEnabled != enabled else { return }
+        captureButtonIsEnabled = enabled
+        reloadCaptureActionButton()
     }
 
     private func applyRegionSelector() {
@@ -1392,7 +1344,11 @@ final class CaptureBar: NSPanel {
         for (mode, btn) in modeButtons {
             btn.isActiveMode = (mode == selectedMode)
         }
-        captureButton?.title = selectedMode.isRecording ? "Record" : "Capture"
+        let title = selectedMode.isRecording ? "Record" : "Capture"
+        if captureButtonTitle != title {
+            captureButtonTitle = title
+            reloadCaptureActionButton()
+        }
 
         if showsWindowPicker || selectedMode.isRecording {
             applyCapturePreview()

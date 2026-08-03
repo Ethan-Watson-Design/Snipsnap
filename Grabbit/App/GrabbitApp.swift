@@ -13,8 +13,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private static let menuBarIconImage: NSImage = {
         if let base = NSImage(named: "MenuBarIcon"),
            let image = base.copy() as? NSImage {
-            // Landscape filled rabbit matching the cross-stitch silhouette.
-            image.size = NSSize(width: 25, height: 12)
+            // Landscape filled rabbit matching the cross-stitch silhouette
+            // (traced from the RabbitHop2 mid-air pose, native 30×14 aspect).
+            // Rendered slightly below native size so it sits smaller in the menu bar.
+            image.size = NSSize(width: 26, height: 12)
             image.isTemplate = true
             return image
         }
@@ -31,6 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingEscapeLocalMonitor: Any?
     private var recordingElapsedSeconds = 0
     private var recordingTimerSource: DispatchSourceTimer?
+    private var historyObserver: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DesignTokens.Typography.registerBundledFonts()
@@ -43,9 +46,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             applyIdleStatusItemAppearance(to: button)
         }
 
+        historyObserver = NotificationCenter.default.addObserver(
+            forName: .captureHistoryDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.rebuildMenu()
+        }
+
         // Paint the status item before loading capture history (disk + optional thumb work).
         DispatchQueue.main.async { [weak self] in
             self?.rebuildMenu()
+            // Index anything already in the save folder (e.g. after switching folders or
+            // restarting) so Recents / Show All aren't empty until the user captures again.
+            CaptureHistory.shared.scheduleReconcileWithDisk()
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -106,10 +120,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let trusted = AXIsProcessTrusted()
+        #if DEBUG
         print("[Grabbit] Accessibility trusted: \(trusted)")
+        #endif
 
         registerGlobalHotkeys()
+        #if DEBUG
         print("[Grabbit] Global monitor registered: \(globalMonitor != nil), local: \(localHotkeyMonitor != nil)")
+        #endif
     }
 
     private func registerGlobalHotkeys() {
@@ -140,18 +158,25 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let option = flags.contains(.option)
         let control = flags.contains(.control)
 
+        // Defaults mirror native macOS screenshot shortcuts so Grabbit can replace them.
         if event.keyCode == 20, command, shift, !option, !control {
+            #if DEBUG
             print("[Grabbit] ⌘⇧3 triggered")
-            takeScreenshot()
+            #endif
+            takeFullScreenScreenshot()
             return true
         }
         if event.keyCode == 21, command, shift, !option, !control {
+            #if DEBUG
             print("[Grabbit] ⌘⇧4 triggered")
-            toggleRecording()
+            #endif
+            takeScreenshot()
             return true
         }
-        if event.keyCode == 22, command, !shift, !option, !control {
-            print("[Grabbit] ⌘6 triggered")
+        if event.keyCode == 23, command, shift, !option, !control {
+            #if DEBUG
+            print("[Grabbit] ⌘⇧5 triggered")
+            #endif
             CaptureBar.show()
             return true
         }
@@ -162,7 +187,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard !AXIsProcessTrusted() else { return }
 
         let appPath = Bundle.main.bundlePath
+        #if DEBUG
         print("[Grabbit] Grant accessibility at: \(appPath)")
+        #endif
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(appPath, forType: .string)
@@ -170,7 +197,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "Accessibility Access Required"
         alert.informativeText = """
-            Grabbit needs Accessibility access for global shortcuts (⌘⇧3).
+            Grabbit needs Accessibility access for global shortcuts (⌘⇧3 / ⌘⇧4 / ⌘⇧5).
 
             The app path has been copied to your clipboard.
 
@@ -196,9 +223,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
             if AXIsProcessTrusted() {
+                #if DEBUG
                 print("[Grabbit] Accessibility granted — re-registering monitor")
+                #endif
                 self.registerGlobalHotkeys()
+                #if DEBUG
                 print("[Grabbit] Monitor re-registered: global=\(self.globalMonitor != nil) local=\(self.localHotkeyMonitor != nil)")
+                #endif
             } else {
                 self.pollForAccessibilityGrant()
             }
@@ -207,6 +238,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         stopRecordingEscapeMonitor()
+        if let historyObserver {
+            NotificationCenter.default.removeObserver(historyObserver)
+            self.historyObserver = nil
+        }
         if let monitor = globalMonitor {
             NSEvent.removeMonitor(monitor)
             globalMonitor = nil
@@ -262,14 +297,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func rebuildMenu() {
         let menu = NSMenu()
 
-        let captureBarItem = NSMenuItem(title: "Open Capture Bar", action: #selector(showCaptureBar), keyEquivalent: "6")
-        captureBarItem.keyEquivalentModifierMask = [.command]
+        let captureBarItem = NSMenuItem(title: "Open Capture Bar", action: #selector(showCaptureBar), keyEquivalent: "5")
+        captureBarItem.keyEquivalentModifierMask = [.command, .shift]
         captureBarItem.target = self
         menu.addItem(captureBarItem)
 
         menu.addItem(.separator())
 
-        let screenshotItem = NSMenuItem(title: "Snap Area", action: #selector(takeScreenshot), keyEquivalent: "3")
+        let fullScreenItem = NSMenuItem(title: "Grab Screen", action: #selector(takeFullScreenScreenshot), keyEquivalent: "3")
+        fullScreenItem.keyEquivalentModifierMask = [.command, .shift]
+        fullScreenItem.target = self
+        menu.addItem(fullScreenItem)
+
+        let screenshotItem = NSMenuItem(title: "Grab Region", action: #selector(takeScreenshot), keyEquivalent: "4")
         screenshotItem.keyEquivalentModifierMask = [.command, .shift]
         screenshotItem.target = self
         menu.addItem(screenshotItem)
@@ -285,8 +325,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else if RecordingEngine.shared.isStartingRecording {
             recItem = NSMenuItem(title: "Starting…", action: nil, keyEquivalent: "")
         } else {
-            recItem = NSMenuItem(title: "Record Screen", action: #selector(toggleRecording), keyEquivalent: "4")
-            recItem.keyEquivalentModifierMask = [.command, .shift]
+            recItem = NSMenuItem(title: "Record Screen", action: #selector(toggleRecording), keyEquivalent: "")
             recItem.target = self
         }
         menu.addItem(recItem)
@@ -435,6 +474,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openSettings() {
         SettingsWindow.show()
+    }
+
+    @objc func takeFullScreenScreenshot() {
+        let earlySignals = CaptureClassifier.gatherEarlyCaptureSignals()
+        guard let rect = NSScreen.main?.frame else { return }
+        ScreenshotEngine.captureRegion(rect) { image in
+            guard let image else { return }
+            CapturePipeline.finishScreenshot(
+                image,
+                captureRect: rect,
+                earlySignals: earlySignals
+            )
+        }
     }
 
     @objc func takeScreenshot() {

@@ -307,7 +307,9 @@ private final class RecordingPreviewContentCapture: NSObject, SCStreamOutput {
             try await captureStream.startCapture()
             stream = captureStream
         } catch {
+            #if DEBUG
             print("[RecordingBackgroundPreview] Content capture failed: \(error)")
+            #endif
         }
     }
 

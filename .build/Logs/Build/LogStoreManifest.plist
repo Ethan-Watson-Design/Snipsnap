@@ -6,7 +6,7 @@
 	<integer>12</integer>
 	<key>logs</key>
 	<dict>
-		<key>7E5493D1-5D9B-432A-8DB3-5869EE426A4F</key>
+		<key>2BF6A077-1086-40D9-AB87-A7A794FF0C3C</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -15,7 +15,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>7E5493D1-5D9B-432A-8DB3-5869EE426A4F.xcactivitylog</string>
+			<string>2BF6A077-1086-40D9-AB87-A7A794FF0C3C.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -29,7 +29,7 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>25</integer>
+				<integer>1</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
 			<string>Grabbit project</string>
@@ -40,15 +40,15 @@
 			<key>signature</key>
 			<string>Building project Grabbit with scheme Grabbit and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>807329065.25504506</real>
+			<real>807385329.66687405</real>
 			<key>timeStoppedRecording</key>
-			<real>807329084.29486406</real>
+			<real>807385375.85447896</real>
 			<key>title</key>
 			<string>Building project Grabbit with scheme Grabbit and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>7E5493D1-5D9B-432A-8DB3-5869EE426A4F</string>
+			<string>2BF6A077-1086-40D9-AB87-A7A794FF0C3C</string>
 		</dict>
-		<key>D74C29F7-0560-40B1-9A66-6D6136725F2F</key>
+		<key>EE120E99-3744-49C6-83B6-2C71632762FF</key>
 		<dict>
 			<key>className</key>
 			<string>IDECommandLineBuildLog</string>
@@ -57,7 +57,7 @@
 			<key>domainType</key>
 			<string>Xcode.IDEActivityLogDomainType.BuildLog</string>
 			<key>fileName</key>
-			<string>D74C29F7-0560-40B1-9A66-6D6136725F2F.xcactivitylog</string>
+			<string>EE120E99-3744-49C6-83B6-2C71632762FF.xcactivitylog</string>
 			<key>hasPrimaryLog</key>
 			<true/>
 			<key>primaryObservable</key>
@@ -71,24 +71,24 @@
 				<key>totalNumberOfTestFailures</key>
 				<integer>0</integer>
 				<key>totalNumberOfWarnings</key>
-				<integer>25</integer>
+				<integer>1</integer>
 			</dict>
 			<key>schemeIdentifier-containerName</key>
-			<string>Snipsnap project</string>
+			<string>Grabbit project</string>
 			<key>schemeIdentifier-schemeName</key>
-			<string>Snipsnap</string>
+			<string>Grabbit</string>
 			<key>schemeIdentifier-sharedScheme</key>
 			<integer>1</integer>
 			<key>signature</key>
-			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<string>Building project Grabbit with scheme Grabbit and configuration Debug</string>
 			<key>timeStartedRecording</key>
-			<real>807323130.17364001</real>
+			<real>807385444.26192999</real>
 			<key>timeStoppedRecording</key>
-			<real>807323143.80994904</real>
+			<real>807385473.36648905</real>
 			<key>title</key>
-			<string>Building project Snipsnap with scheme Snipsnap and configuration Debug</string>
+			<string>Building project Grabbit with scheme Grabbit and configuration Debug</string>
 			<key>uniqueIdentifier</key>
-			<string>D74C29F7-0560-40B1-9A66-6D6136725F2F</string>
+			<string>EE120E99-3744-49C6-83B6-2C71632762FF</string>
 		</dict>
 	</dict>
 </dict>

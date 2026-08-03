@@ -818,6 +818,9 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     var videoDuration: Double = 0
     /// Recording width/height. When > 0, zoom selections lock to this aspect ratio.
     var videoAspectRatio: CGFloat = 0
+    /// Natural recording size (orientation-corrected). Used to map the aspect-fit video
+    /// frame inside letterboxed previews (e.g. View All) so zoom stays on the media.
+    var videoMediaSize: CGSize = .zero
     /// When true, zoom overlays are hidden and zoom is applied to the video layer instead.
     var isPlaybackActive: Bool = false
     /// When true, scrubbing the timeline — same live zoom behavior as playback.
@@ -2115,6 +2118,11 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    /// Accepts keyboard focus without drawing AppKit's focus ring.
+    override var focusRingType: NSFocusRingType {
+        get { .none }
+        set { }
+    }
 
     override func mouseDown(with event: NSEvent) {
         guard !isExporting else { return }
@@ -2225,11 +2233,24 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 blurRadius: selectedSpotlightBlurRadius
             )
         case .zoom:
+            // Zoom targets the recording frame only — ignore letterbox/pillarbox chrome.
+            let content = videoContentFrame
+            guard pt.x >= content.minX, pt.x <= content.maxX,
+                  pt.y >= content.minY, pt.y <= content.maxY else {
+                setActiveToolUse(false)
+                return
+            }
             dragStart = pt
             currentAnnotation = .zoom(rect: CGRect(origin: pt, size: .zero))
         case .text:
+            let content = videoContentFrame
+            guard pt.x >= content.minX, pt.x <= content.maxX,
+                  pt.y >= content.minY, pt.y <= content.maxY else {
+                setActiveToolUse(false)
+                return
+            }
             commitActiveTextField()
-            placeTextField(at: pt)
+            placeTextField(at: clampPointToVideoContent(pt))
             return
         case .emoji:
             let winPt = convert(pt, to: nil)
@@ -2308,7 +2329,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
             )
         case .zoom:
             currentAnnotation = .zoom(
-                rect: zoomDragRect(from: dragStart, to: pt)
+                rect: zoomDragRect(from: dragStart, to: clampPointToVideoContent(pt))
             )
         case .select:
             if let idx = selectedIndex {
@@ -2319,7 +2340,18 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 switch selectDragMode {
                 case .moveWhole:
                     let delta = CGPoint(x: pt.x - dragOffset.x, y: pt.y - dragOffset.y)
-                    annotations[idx].content = moved(annotations[idx].content, by: delta)
+                    var next = moved(annotations[idx].content, by: delta)
+                    if case let .zoom(rect) = next {
+                        next = .zoom(rect: constrainedZoomRectPreservingSize(rect))
+                    } else if case let .text(origin, text, color, maxWidth) = next {
+                        next = .text(
+                            origin: constrainedTextOrigin(origin, text: text, maxWidth: maxWidth),
+                            text: text,
+                            color: color,
+                            maxWidth: maxWidth
+                        )
+                    }
+                    annotations[idx].content = next
                     dragOffset = pt
                 case .arrowStart:
                     if case let .arrow(_, to, bend, color, tipStyle, pathStyle, seed) = annotations[idx].content {
@@ -2380,7 +2412,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 case .textWidthLeft(let anchorRight):
                     if case let .text(origin, text, color, _) = annotations[idx].content {
                         let minWidth: CGFloat = 40
-                        let newOriginX = min(pt.x + Self.textHPadding, anchorRight - minWidth)
+                        let content = videoContentFrame
+                        let minOriginX = content.minX + Self.textHPadding
+                        let newOriginX = min(
+                            max(pt.x + Self.textHPadding, minOriginX),
+                            anchorRight - minWidth
+                        )
                         let newWidth = anchorRight - newOriginX
                         annotations[idx].content = .text(
                             origin: CGPoint(x: newOriginX, y: origin.y),
@@ -2392,7 +2429,12 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                 case .textWidthRight(let anchorLeft):
                     if case let .text(origin, text, color, _) = annotations[idx].content {
                         let minWidth: CGFloat = 40
-                        let newWidth = max(minWidth, pt.x - Self.textHPadding - anchorLeft)
+                        let content = videoContentFrame
+                        let maxContentRight = content.maxX - Self.textHPadding
+                        let newWidth = max(
+                            minWidth,
+                            min(pt.x - Self.textHPadding, maxContentRight) - anchorLeft
+                        )
                         annotations[idx].content = .text(
                             origin: origin,
                             text: text,
@@ -2414,7 +2456,11 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
                         )
                     } else if case .zoom = annotations[idx].content {
                         annotations[idx].content = .zoom(
-                            rect: resizedZoomRect(anchor: anchor, handle: handle, to: pt)
+                            rect: resizedZoomRect(
+                                anchor: anchor,
+                                handle: handle,
+                                to: clampPointToVideoContent(pt)
+                            )
                         )
                     } else if case .crop = annotations[idx].content {
                         annotations[idx].content = .crop(
@@ -2514,12 +2560,18 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         let measureText = field.stringValue.isEmpty
             ? (field.placeholderString ?? " ")
             : field.stringValue
-        field.frame = textPillRect(origin: origin, text: measureText, maxWidth: nil)
+        let content = videoContentFrame
+        let availableWidth = max(1, content.maxX - origin.x - Self.textHPadding)
+        let unconstrained = textMetrics(origin: origin, text: measureText, maxWidth: nil)
+        let maxWidth: CGFloat? = unconstrained.contentWidth > availableWidth ? availableWidth : nil
+        let clampedOrigin = constrainedTextOrigin(origin, text: measureText, maxWidth: maxWidth)
+        field.frame = textPillRect(origin: clampedOrigin, text: measureText, maxWidth: maxWidth)
     }
 
     private func placeTextField(at pt: CGPoint) {
         let placeholder = "Type here…"
-        let frame = textPillRect(origin: pt, text: placeholder, maxWidth: nil)
+        let origin = constrainedTextOrigin(pt, text: placeholder, maxWidth: nil)
+        let frame = textPillRect(origin: origin, text: placeholder, maxWidth: nil)
 
         let field = AnnotationTextField(frame: frame)
         field.isEditable = true
@@ -2556,8 +2608,13 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         activeTextField = nil
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty {
+            let origin = constrainedTextOrigin(
+                textOrigin(for: field),
+                text: text,
+                maxWidth: nil
+            )
             appendAnnotation(.text(
-                origin: textOrigin(for: field),
+                origin: origin,
                 text: text,
                 color: field.textColor ?? selectedColor,
                 maxWidth: nil
@@ -2794,32 +2851,151 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    /// Aspect-fit frame of the recording inside this canvas (letterbox-aware).
+    private var videoContentFrame: CGRect {
+        let canvasSize = bounds.size
+        if videoMediaSize.width > 0, videoMediaSize.height > 0 {
+            return ZoomEffect.aspectFitRect(for: videoMediaSize, in: canvasSize)
+        }
+        if videoAspectRatio > 0 {
+            return ZoomEffect.aspectFitRect(
+                for: CGSize(width: videoAspectRatio, height: 1),
+                in: canvasSize
+            )
+        }
+        return bounds
+    }
+
+    private func clampPointToVideoContent(_ point: CGPoint) -> CGPoint {
+        let frame = videoContentFrame
+        guard frame.width > 0, frame.height > 0 else { return point }
+        return CGPoint(
+            x: min(max(point.x, frame.minX), frame.maxX),
+            y: min(max(point.y, frame.minY), frame.maxY)
+        )
+    }
+
+    /// Keeps a text annotation's pill inside the video/recording frame.
+    private func constrainedTextOrigin(
+        _ origin: CGPoint,
+        text: String,
+        maxWidth: CGFloat?
+    ) -> CGPoint {
+        let frame = videoContentFrame
+        guard frame.width > 0, frame.height > 0 else { return origin }
+        var o = origin
+        var pill = textMetrics(origin: o, text: text, maxWidth: maxWidth).pillRect
+        if pill.minX < frame.minX { o.x += frame.minX - pill.minX }
+        if pill.minY < frame.minY { o.y += frame.minY - pill.minY }
+        pill = textMetrics(origin: o, text: text, maxWidth: maxWidth).pillRect
+        if pill.maxX > frame.maxX { o.x -= pill.maxX - frame.maxX }
+        if pill.maxY > frame.maxY { o.y -= pill.maxY - frame.maxY }
+        return o
+    }
+
+    /// Keeps a zoom rect inside the video frame without changing its size (move).
+    private func constrainedZoomRectPreservingSize(_ rect: CGRect) -> CGRect {
+        let frame = videoContentFrame
+        guard frame.width > 0, frame.height > 0 else { return rect }
+        var moved = rect
+        if moved.width > frame.width {
+            moved.size.width = frame.width
+            if effectiveVideoAspectRatio > 0 {
+                moved.size.height = moved.width / effectiveVideoAspectRatio
+            }
+        }
+        if moved.height > frame.height {
+            moved.size.height = frame.height
+            if effectiveVideoAspectRatio > 0 {
+                moved.size.width = moved.height * effectiveVideoAspectRatio
+            }
+        }
+        if moved.minX < frame.minX { moved.origin.x += frame.minX - moved.minX }
+        if moved.minY < frame.minY { moved.origin.y += frame.minY - moved.minY }
+        if moved.maxX > frame.maxX { moved.origin.x -= moved.maxX - frame.maxX }
+        if moved.maxY > frame.maxY { moved.origin.y -= moved.maxY - frame.maxY }
+        return moved
+    }
+
+    /// Caps an aspect-locked zoom so it stays inside the video frame, anchored at `origin`.
+    private func sizeLimitedZoomRect(
+        from origin: CGPoint,
+        proposed: CGRect,
+        aspectRatio: CGFloat
+    ) -> CGRect {
+        let frame = videoContentFrame
+        guard frame.width > 0, frame.height > 0, aspectRatio > 0 else { return proposed }
+
+        let growingRight = proposed.maxX >= origin.x - 0.5
+        let growingUp = proposed.maxY >= origin.y - 0.5
+        let maxWidth = growingRight ? max(0, frame.maxX - origin.x) : max(0, origin.x - frame.minX)
+        let maxHeight = growingUp ? max(0, frame.maxY - origin.y) : max(0, origin.y - frame.minY)
+        let limitedWidth = min(proposed.width, maxWidth, maxHeight * aspectRatio)
+        let limitedHeight = limitedWidth / aspectRatio
+        guard limitedWidth > 0, limitedHeight > 0 else {
+            return CGRect(origin: origin, size: .zero)
+        }
+        return CGRect(
+            x: growingRight ? origin.x : origin.x - limitedWidth,
+            y: growingUp ? origin.y : origin.y - limitedHeight,
+            width: limitedWidth,
+            height: limitedHeight
+        )
+    }
+
     /// Aspect-locked rect from a drag origin to the current pointer (zoom tool).
     private func zoomDragRect(from origin: CGPoint, to point: CGPoint) -> CGRect {
         let ratio = effectiveVideoAspectRatio
+        let originInVideo = clampPointToVideoContent(origin)
+        let pointInVideo = clampPointToVideoContent(point)
         guard ratio > 0 else {
             return CGRect(
-                x: min(origin.x, point.x),
-                y: min(origin.y, point.y),
-                width: abs(point.x - origin.x),
-                height: abs(point.y - origin.y)
+                x: min(originInVideo.x, pointInVideo.x),
+                y: min(originInVideo.y, pointInVideo.y),
+                width: abs(pointInVideo.x - originInVideo.x),
+                height: abs(pointInVideo.y - originInVideo.y)
             )
         }
-        return aspectLockedRect(from: origin, to: point, aspectRatio: ratio, minSize: 1)
+        let proposed = aspectLockedRect(
+            from: originInVideo,
+            to: pointInVideo,
+            aspectRatio: ratio,
+            minSize: 1
+        )
+        return sizeLimitedZoomRect(from: originInVideo, proposed: proposed, aspectRatio: ratio)
     }
 
     private func resizedZoomRect(anchor: CGRect, handle: RectResizeHandle, to point: CGPoint) -> CGRect {
         let ratio = effectiveVideoAspectRatio
+        let pointInVideo = clampPointToVideoContent(point)
         guard ratio > 0 else {
-            return resizedRect(anchor: anchor, handle: handle, to: point)
+            return constrainedZoomRectPreservingSize(
+                resizedRect(anchor: anchor, handle: handle, to: pointInVideo)
+            )
         }
-        return aspectLockedResizedRect(
+        let proposed = aspectLockedResizedRect(
             anchor: anchor,
             handle: handle,
-            to: point,
+            to: pointInVideo,
             aspectRatio: ratio,
             minSize: rectMinSize
         )
+        // Re-anchor from the fixed opposite corner/edge used by the resize handle.
+        let origin: CGPoint
+        switch handle {
+        case .topLeft:
+            origin = CGPoint(x: anchor.maxX, y: anchor.minY)
+        case .topRight:
+            origin = CGPoint(x: anchor.minX, y: anchor.minY)
+        case .bottomRight:
+            origin = CGPoint(x: anchor.minX, y: anchor.maxY)
+        case .bottomLeft:
+            origin = CGPoint(x: anchor.maxX, y: anchor.maxY)
+        case .top, .bottom, .left, .right:
+            // Edge handles grow about the center — keep the result inside by translation/size.
+            return constrainedZoomRectPreservingSize(proposed)
+        }
+        return sizeLimitedZoomRect(from: origin, proposed: proposed, aspectRatio: ratio)
     }
 
     private var effectiveVideoAspectRatio: CGFloat {
@@ -3888,7 +4064,7 @@ final class ToolTooltipPanel: NSPanel {
         ignoresMouseEvents = true
 
         box.wantsLayer = true
-        box.layer?.backgroundColor = DesignTokens.Color.primary.ns.cgColor
+        box.layer?.backgroundColor = DesignTokens.Palette.neutral[.t900].ns.cgColor
         box.layer?.cornerRadius = 2
 
         nameLabel.font = NSFont.grabbit(.label)
